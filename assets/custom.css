@@ -1,0 +1,130 @@
+/* --- FONDO GENERAL --- */
+body {
+    background-color: #0b0c10 !important; /* Negro casi puro */
+    color: #c5c6c7 !important; /* Gris muy claro */
+    font-family: 'Roboto', 'Segoe UI', sans-serif;
+}
+
+/* --- TARJETAS (CARDS) --- */
+.card {
+    background-color: #1f2833 !important; /* Gris azulado oscuro */
+    border: 1px solid #45a29e !important; /* Borde Cyan sutil */
+    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+}
+
+.card-header {
+    background-color: #1f2833 !important;
+    border-bottom: 1px solid #45a29e !important;
+    color: #66fcf1 !important; /* Texto Cyan Neon */
+    font-weight: bold;
+}
+
+/* --- INPUTS Y SELECTORES (BOOTSTRAP) --- */
+input.form-control, select.form-select {
+    background-color: #0b0c10 !important;
+    border: 1px solid #45a29e !important;
+    color: #ffffff !important;
+}
+
+input.form-control::placeholder {
+    color: #6c757d !important;
+}
+
+input.form-control:focus {
+    background-color: #1a1d24 !important;
+    box-shadow: 0 0 5px #66fcf1;
+    border-color: #66fcf1 !important;
+    color: white !important;
+}
+
+/* --- PESTAÑAS (TABS) --- */
+.nav-tabs {
+    border-bottom: 1px solid #45a29e;
+}
+
+.nav-link {
+    color: #c5c6c7 !important;
+}
+
+.nav-link.active {
+    background-color: #1f2833 !important;
+    border-color: #45a29e #45a29e #1f2833 !important;
+    color: #66fcf1 !important;
+}
+
+/* --- BOTONES --- */
+.btn-primary {
+    background-color: #45a29e;
+    border: none;
+    color: #0b0c10;
+    font-weight: bold;
+}
+.btn-primary:hover {
+    background-color: #66fcf1;
+}
+
+/* --- TEXTOS ESPECÍFICOS --- */
+h1, h2, h3, h4, h5 {
+    color: #ffffff !important;
+}
+
+.text-muted {
+    color: #8899a6 !important;
+}
+
+/* --- AJUSTES DE LA TABLA (AG GRID) --- */
+.ag-theme-alpine-dark {
+    --ag-background-color: #1f2833;
+    --ag-header-background-color: #0b0c10;
+    --ag-odd-row-background-color: #171f26;
+    --ag-foreground-color: #ffffff;
+    --ag-border-color: #45a29e;
+}
+
+.ag-header-cell-label {
+    color: #66fcf1; /* Color de los títulos de columna */
+}
+
+/* --- NUEVO: DROPDOWNS DE DASH (React-Select) --- */
+/* Esto arregla el menú blanco de Analytics para que coincida con tu tema */
+
+/* La caja cerrada */
+.Select-control {
+    background-color: #0b0c10 !important; /* Fondo Negro (igual que tus inputs) */
+    border: 1px solid #45a29e !important; /* Borde Cyan */
+    color: #ffffff !important;
+}
+
+/* El texto de la opción elegida */
+.Select-value-label {
+    color: #ffffff !important;
+}
+
+/* El menú desplegable (la lista abierta) */
+.Select-menu-outer {
+    background-color: #1f2833 !important; /* Fondo Gris Azulado (igual que tus cards) */
+    border: 1px solid #45a29e !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+}
+
+/* Las opciones individuales */
+.Select-option {
+    background-color: #1f2833 !important;
+    color: #c5c6c7 !important;
+}
+
+/* Opción cuando pasas el mouse por encima (Hover) */
+.Select-option.is-focused {
+    background-color: #45a29e !important; /* Tu color de acento */
+    color: #0b0c10 !important; /* Texto oscuro para contraste */
+}
+
+/* El texto "Select..." cuando no hay nada */
+.Select-placeholder {
+    color: #6c757d !important;
+}
+
+/* La flechita del dropdown */
+.Select-arrow {
+    border-color: #45a29e transparent transparent !important;
+}

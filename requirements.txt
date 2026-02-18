@@ -1,0 +1,11 @@
+dash
+dash-bootstrap-components
+dash-ag-grid
+pandas
+plotly
+gunicorn
+openpyxl
+yfinance
+supabase
+psycopg2-binary
+python-dotenv
