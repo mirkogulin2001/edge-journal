@@ -1062,12 +1062,17 @@ def layout_dashboard(username):
 app.layout = html.Div([
     dcc.Store(id='session-store', storage_type='session'),
     dcc.Store(id='selected-trade-store'),
+    
+    # --- AQUÍ DEBES AGREGAR ESTA LÍNEA MÁGICA ---
+    dcc.Store(id='perf-prices-cache', storage_type='session'),
+    # -------------------------------------------
+    
     dcc.Location(id='url', refresh=False),
     global_modals,
     dbc.Container([
         dbc.Row([
             # CAMBIO AQUI: Quitamos 'fw-bold' y agregamos 'fontWeight': 'normal'
-            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8), 
+            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8),
             dbc.Col([
                 dbc.Button("CONFIG. ESTRATEGIA", id="open-config-btn", color="dark", className="me-3 fw-bold", style={"border": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), 
                 dbc.Button("SALIR", id="logout-btn", color="dark", outline=True, className="fw-bold", style={"fontFamily": "Consolas", "color": COLOR_NEUTRAL, "borderColor": BORDER_COLOR})
@@ -1960,3 +1965,4 @@ def update_top_market_pills(tab, g_msg, session):
 if __name__ == '__main__':
 
     app.run(debug=True)
+
