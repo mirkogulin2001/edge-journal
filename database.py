@@ -35,7 +35,7 @@ def register_user(username, password, full_name):
         
         data = {
             "username": username,
-            "password": password,
+            "password_hash": password,  # <-- CAMBIADO: era "password", ahora "password_hash"
             "full_name": full_name,
             "config": {}
         }
