@@ -1857,7 +1857,8 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
                 except:
                     pass
         
-        daily_df, new_prices_dict = build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict)
+        daily_df = build_daily_portfolio(df_closed, initial_balance)
+
         
         if daily_df.empty:
             return empty_fig, empty_fig, [], "⚠️ Error calculando portfolio.", no_update
@@ -2040,3 +2041,4 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
 
 if __name__ == '__main__':
     app.run(debug=True)
+
