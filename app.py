@@ -13,6 +13,41 @@ import yfinance as yf
 import numpy as np
 import requests
 import re 
+from datetime import datetime as dt_datetime
+
+# --- CACHE PARA PRECIOS LIVE (30 segundos) ---
+_price_cache = {}
+_cache_timestamp = {}
+
+def get_cached_live_prices(tickers):
+    """Obtiene precios con cache de 30 segundos para evitar descargas repetitivas"""
+    now = dt_datetime.now()
+    cache_key = tuple(sorted(tickers))
+    
+    # Verificar si hay cache válido (menos de 30 segundos)
+    if cache_key in _price_cache:
+        last_update = _cache_timestamp.get(cache_key)
+        if last_update and (now - last_update).seconds < 30:
+            print(f"[CACHE] ⚡ Usando precios cacheados para {len(tickers)} tickers")
+            return _price_cache[cache_key]
+    
+    # Descargar nuevos precios
+    print(f"[DOWNLOAD] 📥 Descargando precios para {len(tickers)} tickers")
+    try:
+        data = yf.download(tickers, period="1d", progress=False)['Close']
+        
+        # Guardar en cache
+        _price_cache[cache_key] = data
+        _cache_timestamp[cache_key] = now
+        
+        return data
+    except Exception as e:
+        print(f"[ERROR] ❌ Error descargando precios: {e}")
+        # Si hay error pero tenemos cache viejo, usarlo
+        if cache_key in _price_cache:
+            print(f"[CACHE] ⚠️ Usando cache viejo por error de descarga")
+            return _price_cache[cache_key]
+        return None
 
 # --- CONFIGURACIÓN DE COLORES QUANT / TERMINAL ---
 COLOR_POS = "#00B0BD"      # Teal Neón
@@ -97,73 +132,49 @@ def format_df(df, user_config):
 
 def calculate_live_metrics(df_open):
     if df_open.empty: return df_open
-    df_open['current_price'] = df_open['entry_price']; df_open['unrealized_pnl'] = 0.0; df_open['open_risk'] = 0.0
+    df_open['current_price'] = df_open['entry_price']
+    df_open['unrealized_pnl'] = 0.0
+    df_open['open_risk'] = 0.0
+    
     try:
         tickers = [t for t in df_open['symbol'].unique() if t]
         if tickers:
-            data = yf.download(tickers, period="1d", progress=False)['Close']
-            def get_p(row):
-                s = row['symbol']
-                try:
-                    if isinstance(data, pd.Series): return float(data.iloc[-1])
-                    if isinstance(data, pd.DataFrame) and s in data: return float(data[s].iloc[-1])
-                    return row['entry_price']
-                except: return row['entry_price']
-            df_open['current_price'] = df_open.apply(get_p, axis=1)
-            df_open['unrealized_pnl'] = df_open.apply(lambda x: (x['current_price']-x['entry_price'])*x['quantity'] if x['side']=='LONG' else (x['entry_price']-x['current_price'])*x['quantity'], axis=1)
-            df_open['open_risk'] = df_open.apply(lambda x: (x['current_stop_loss']-x['entry_price'])*x['quantity'] if x['side']=='LONG' else (x['entry_price']-x['current_stop_loss'])*x['quantity'], axis=1)
-            for c in ['current_price','unrealized_pnl','open_risk']: df_open[c] = df_open[c].astype(float).round(2)
-    except: pass
-    return df_open
-# --- NUEVA FUNCIÓN: MARKET PILLS (TICKERS DIARIOS) ---
-def get_market_pills(active_tickers):
-    default_tickers = ['SPY', 'QQQ']
-    # Unimos los default con tus activos (sin repetir)
-    all_tickers = default_tickers + [t for t in active_tickers if t not in default_tickers]
-    
-    pills = []
-    try:
-        # Descargamos los últimos 5 días para asegurar tener precio de cierre previo y actual
-        data = yf.download(all_tickers, period="5d", progress=False, auto_adjust=True)
-        if not data.empty:
-            closes = data['Close'] if 'Close' in data.columns else data
+            # USAR CACHE EN LUGAR DE DESCARGA DIRECTA
+            data = get_cached_live_prices(tickers)
             
-            for t in all_tickers:
-                try:
-                    if isinstance(closes, pd.DataFrame) and t in closes.columns:
-                        s = closes[t].dropna()
-                    elif isinstance(closes, pd.Series) and t == all_tickers[0]:
-                        s = closes.dropna()
-                    else:
-                        continue
-                        
-                    if len(s) >= 2:
-                        prev = s.iloc[-2]
-                        curr = s.iloc[-1]
-                        pct = ((curr / prev) - 1) * 100
-                        
-                        color = COLOR_POS if pct >= 0 else COLOR_NEG
-                        is_bench = t in default_tickers
-                        
-                        pill = html.Div([
-                            html.Span(f"{t} ", style={"color": TEXT_MAIN, "fontWeight": "bold" if is_bench else "normal"}),
-                            html.Span(f"{pct:+.2f}%", style={"color": color, "fontWeight": "bold"})
-                        ], style={
-                            # Resaltamos un poco más el SPY y QQQ
-                            "backgroundColor": "#1E222B" if is_bench else CARD_BG,
-                            "border": f"1px solid {COLOR_NEUTRAL if is_bench else BORDER_COLOR}",
-                            "borderRadius": "4px",
-                            "padding": "2px 10px",
-                            "fontSize": "0.75rem",
-                            "fontFamily": "Consolas, monospace",
-                            "whiteSpace": "nowrap"
-                        })
-                        pills.append(pill)
-                except: continue
-    except: pass
-        
-    # Las metemos en un contenedor flexible con scroll invisible
-    return html.Div(pills, style={"display": "flex", "gap": "10px", "overflowX": "auto", "scrollbarWidth": "none", "alignItems": "center"})
+            if data is not None:  # Solo procesar si tenemos datos
+                def get_p(row):
+                    s = row['symbol']
+                    try:
+                        if isinstance(data, pd.Series): 
+                            return float(data.iloc[-1])
+                        if isinstance(data, pd.DataFrame) and s in data: 
+                            return float(data[s].iloc[-1])
+                        return row['entry_price']
+                    except: 
+                        return row['entry_price']
+                
+                df_open['current_price'] = df_open.apply(get_p, axis=1)
+                df_open['unrealized_pnl'] = df_open.apply(
+                    lambda x: (x['current_price']-x['entry_price'])*x['quantity'] 
+                    if x['side']=='LONG' 
+                    else (x['entry_price']-x['current_price'])*x['quantity'], 
+                    axis=1
+                )
+                df_open['open_risk'] = df_open.apply(
+                    lambda x: (x['current_stop_loss']-x['entry_price'])*x['quantity'] 
+                    if x['side']=='LONG' 
+                    else (x['entry_price']-x['current_stop_loss'])*x['quantity'], 
+                    axis=1
+                )
+                for c in ['current_price','unrealized_pnl','open_risk']: 
+                    df_open[c] = df_open[c].astype(float).round(2)
+    except Exception as e:
+        print(f"[ERROR] calculate_live_metrics: {e}")
+        pass
+    
+    return df_open
+
 def calc_fd_bins(data):
     if len(data) < 2: return 10
     q75, q25 = np.percentile(data, [75, 25])
@@ -173,6 +184,20 @@ def calc_fd_bins(data):
     if h <= 0: return 20
     bins = int((np.max(data) - np.min(data)) / h)
     return max(10, min(bins, 150))
+
+def safe_float(val):
+    if pd.isna(val) or val == "": return 0.0
+    try:
+        if isinstance(val, (int, float)): return float(val)
+        s = str(val).strip()
+        s = re.sub(r'[^\d.,-]', '', s) 
+        if ',' in s and '.' in s:
+            if s.find(',') > s.find('.'): s = s.replace('.', '').replace(',', '.')
+            else: s = s.replace(',', '')
+        elif ',' in s: s = s.replace(',', '.')
+        return float(s)
+    except: return 0.0
+
 def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None):
     """
     Versión optimizada que acepta precios pre-descargados.
@@ -236,7 +261,7 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
         
         print(f"[PERFORMANCE] ✓ Descarga completa: {len(prices_dict)}/{len(tickers)} exitosos")
     else:
-        print(f"[PERFORMANCE] ✓ Usando precios cacheados ({len(prices_dict)} tickers)")
+        print(f"[PERFORMANCE] ⚡ Usando precios cacheados ({len(prices_dict)} tickers)")
     
     # Construir DataFrame de precios normalizado
     prices_data = {}
@@ -250,24 +275,30 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
     
     prices = pd.DataFrame(prices_data)
     
-    # Calcular cash flows REALIZADOS
-    realized_pnl_flows = {}
+    # Calcular cash flows (ENTRADAS Y SALIDAS)
+    cash_flows = {}
+    
     for _, trade in df.iterrows():
+        # SALIDA DE CASH: Cuando entras al trade (compras)
+        entry_d = trade['entry_date']
+        if pd.notna(entry_d):
+            entry_cost = trade['entry_price'] * trade['quantity']
+            cash_flows[entry_d] = cash_flows.get(entry_d, 0) - entry_cost  # Resta el costo
+        
+        # ENTRADA DE CASH: Cuando cierras el trade (vendes)
         exit_d = trade['exit_date']
         if pd.notna(exit_d):
-            if trade['side'] == 'LONG':
-                pnl = (trade['exit_price'] - trade['entry_price']) * trade['quantity']
-            else:
-                pnl = (trade['entry_price'] - trade['exit_price']) * trade['quantity']
-            realized_pnl_flows[exit_d] = realized_pnl_flows.get(exit_d, 0) + pnl
+            exit_proceeds = trade['exit_price'] * trade['quantity']
+            cash_flows[exit_d] = cash_flows.get(exit_d, 0) + exit_proceeds  # Suma lo recaudado
     
     # Bucle diario
     all_dates = prices.index
     daily_values = []
-    current_realized_cash = initial_balance
+    current_cash = initial_balance  # Cash que va cambiando día a día
     
     for day in all_dates:
-        current_realized_cash += realized_pnl_flows.get(day, 0)
+        # Aplicar flujos de efectivo de este día
+        current_cash += cash_flows.get(day, 0)
         
         open_trades = df[
             (df['entry_date'] <= day) &
@@ -275,14 +306,11 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
         ]
         
         market_value_equity = 0.0
-        invested_capital = 0.0
         
         for _, trade in open_trades.iterrows():
             ticker = trade['symbol']
             qty = trade['quantity']
             entry_price = trade['entry_price']
-            trade_cost = qty * entry_price
-            invested_capital += trade_cost
             
             if ticker in prices.columns and day in prices.index and pd.notna(prices.loc[day, ticker]):
                 current_price = prices.loc[day, ticker]
@@ -290,18 +318,20 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
                 if trade['side'] == 'LONG':
                     market_value_equity += current_price * qty
                 else:
+                    # SHORT: Valor = Capital Inicial + PnL Latente
+                    trade_cost = entry_price * qty
                     pnl_latente = (entry_price - current_price) * qty
                     market_value_equity += (trade_cost + pnl_latente)
             else:
-                market_value_equity += trade_cost
+                # Si no hay precio, usar entry price
+                market_value_equity += entry_price * qty
         
-        available_cash = current_realized_cash - invested_capital
-        total_account_value = available_cash + market_value_equity
+        total_account_value = current_cash + market_value_equity
         
         daily_values.append({
             'date': day,
             'total_value': total_account_value,
-            'cash': available_cash,
+            'cash': current_cash,
             'equity_value': market_value_equity
         })
     
@@ -311,22 +341,19 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
         result['cumulative_return'] = (result['total_value'] / initial_balance) - 1
     
     return result, prices_dict
-def safe_float(val):
-    if pd.isna(val) or val == "": return 0.0
-    try:
-        if isinstance(val, (int, float)): return float(val)
-        s = str(val).strip()
-        s = re.sub(r'[^\d.,-]', '', s) 
-        if ',' in s and '.' in s:
-            if s.find(',') > s.find('.'): s = s.replace('.', '').replace(',', '.')
-            else: s = s.replace(',', '')
-        elif ',' in s: s = s.replace(',', '.')
-        return float(s)
-    except: return 0.0
+
 def build_daily_portfolio(df_closed, initial_balance):
     """
     Calcula el valor diario del portfolio basado en trades históricos.
     Descarga precios diarios vía yfinance para posiciones abiertas en cada día.
+    
+    Args:
+        df_closed: DataFrame con trades cerrados (columnas: symbol, entry_date, exit_date, 
+                   entry_price, exit_price, quantity, side)
+        initial_balance: Capital inicial del portfolio
+    
+    Returns:
+        DataFrame con: date, total_value, cumulative_return, daily_return
     """
     if df_closed.empty:
         return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return'])
@@ -342,10 +369,12 @@ def build_daily_portfolio(df_closed, initial_balance):
     if pd.isna(end_date) or end_date < date.today():
         end_date = date.today()
     
-    # Descargar precios históricos
+    # Descargar precios históricos de todos los tickers
     tickers = list(df['symbol'].unique())
     try:
-        print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers...")
+        print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers: {tickers}")
+        print(f"[PERFORMANCE] Rango de fechas: {start_date} → {end_date}")
+        
         prices_raw = yf.download(
             tickers=tickers,
             start=start_date,
@@ -354,97 +383,74 @@ def build_daily_portfolio(df_closed, initial_balance):
             progress=False
         )
         
+        print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
+        
         # Formatear precios
         if len(tickers) == 1:
             prices = prices_raw[["Close"]].rename(columns={"Close": tickers[0]})
         else:
-            prices = prices_raw["Close"] if "Close" in prices_raw else prices_raw
+            prices = prices_raw["Close"]
         
         prices.index = pd.to_datetime(prices.index).normalize()
+        print(f"[PERFORMANCE] Precios formateados correctamente. {len(prices)} días descargados.")
         
     except Exception as e:
-        print(f"[PERFORMANCE] Error descargando precios: {e}")
-        return pd.DataFrame() # Retornar vacío si falla para evitar crash
+        print(f"[PERFORMANCE] ❌ ERROR descargando precios: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise Exception(f"No se pudieron descargar precios de Yahoo Finance. Verificá tu conexión a internet. Error: {str(e)}")
     
-    # Calcular cash flows REALIZADOS (solo cuando se cierra la operación)
-    # Nota: No restamos el costo al entrar aquí, lo manejaremos dinámicamente en el bucle diario
-    realized_pnl_flows = {}
+    # Calcular cash flows en cada fecha
+    cash_flows = {}
     for _, trade in df.iterrows():
+        entry = trade['entry_date']
+        cost = trade['quantity'] * trade['entry_price']
+        cash_flows[entry] = cash_flows.get(entry, 0) - cost
+        
         exit_d = trade['exit_date']
         if pd.notna(exit_d):
-            # PnL = (Exit - Entry) * Qty  (Ajustado por lado)
-            if trade['side'] == 'LONG':
-                pnl = (trade['exit_price'] - trade['entry_price']) * trade['quantity']
-            else: # SHORT
-                pnl = (trade['entry_price'] - trade['exit_price']) * trade['quantity']
-            
-            realized_pnl_flows[exit_d] = realized_pnl_flows.get(exit_d, 0) + pnl
+            revenue = trade['quantity'] * trade['exit_price']
+            cash_flows[exit_d] = cash_flows.get(exit_d, 0) + revenue
     
-    # Bucle Diario
+    # Calcular valor diario
     all_dates = prices.index
     daily_values = []
-    
-    # El "Cash Realizado" empieza en el balance inicial
-    current_realized_cash = initial_balance
+    cash = initial_balance
     
     for day in all_dates:
-        # 1. Actualizar Cash con PnL de operaciones cerradas HOY
-        current_realized_cash += realized_pnl_flows.get(day, 0)
+        # Actualizar cash con flujos del día
+        cash += cash_flows.get(day, 0)
         
-        # 2. Identificar operaciones ABIERTAS este día
-        # (Entraron antes o hoy) Y (Aun no salen O salen después de hoy)
+        # Posiciones abiertas en este día
         open_trades = df[
             (df['entry_date'] <= day) &
             ((df['exit_date'].isna()) | (df['exit_date'] > day))
         ]
         
-        market_value_equity = 0.0
-        invested_capital = 0.0
-        
+        # Valorar posiciones abiertas
+        equity = 0.0
         for _, trade in open_trades.iterrows():
             ticker = trade['symbol']
-            qty = trade['quantity']
-            entry_price = trade['entry_price']
-            
-            # Capital Comprometido (Cost Basis)
-            trade_cost = qty * entry_price
-            invested_capital += trade_cost
-            
-            # Valor de Mercado Actual
             if ticker in prices.columns and pd.notna(prices.loc[day, ticker]):
-                current_price = prices.loc[day, ticker]
-                
+                price = prices.loc[day, ticker]
                 if trade['side'] == 'LONG':
-                    # Valor Long = Precio * Cantidad
-                    market_value_equity += current_price * qty
-                else: # SHORT
-                    # Valor Short = Capital Invertido + Ganancia (o - Pérdida)
-                    # PnL Latente = (Entrada - Actual) * Qty
-                    pnl_latente = (entry_price - current_price) * qty
-                    market_value_equity += (trade_cost + pnl_latente)
-            else:
-                # Fallback si no hay precio: Valor = Costo (PnL 0)
-                market_value_equity += trade_cost
-
-        # 3. Calcular Totales
-        # Cash Disponible = Cash Realizado - Capital Invertido en Abiertas
-        available_cash = current_realized_cash - invested_capital
+                    equity += trade['quantity'] * price
+                else:  # SHORT
+                    # Para shorts: valor = capital inicial - pérdida/ganancia
+                    equity += trade['quantity'] * (2 * trade['entry_price'] - price)
         
-        # Valor Total Cuenta = Cash Disponible + Valor de Mercado de Inversiones
-        total_account_value = available_cash + market_value_equity
-        
+        total = cash + equity
         daily_values.append({
             'date': day,
-            'total_value': total_account_value,
-            'cash': available_cash, # Para el gráfico de área verde
-            'equity_value': market_value_equity # Para el gráfico de área naranja
+            'total_value': total,
+            'cash': cash,
+            'equity_value': equity
         })
     
     # Crear DataFrame resultado
     result = pd.DataFrame(daily_values)
-    if not result.empty:
-        result['daily_return'] = result['total_value'].pct_change().fillna(0)
-        result['cumulative_return'] = (result['total_value'] / initial_balance) - 1
+    result['daily_return'] = result['total_value'].pct_change()
+    result['cumulative_return'] = (result['total_value'] / initial_balance - 1)
     
     return result
 
@@ -837,7 +843,7 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         fig_evo_ratio.update_layout(title='EVOLUCION RATIO R/B', xaxis_title='Trades', yaxis_title='Ratio', hovermode='x unified', showlegend=False)
         fig_evo_ratio = style_fig(fig_evo_ratio)
 
-  # --- EDGE EVOLUTION ---
+        # --- EDGE EVOLUTION ---
         # Cálculo del Edge acumulativo: E(x) = (Win Rate × Ratio) - Loss Rate
         # Convertimos win_rate y loss_rate de porcentaje a decimal
         df_closed['cum_edge'] = (df_closed['cum_win_rate'] / 100) * df_closed['cum_ratio'] - (df_closed['cum_loss_rate'] / 100)
@@ -906,7 +912,6 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
             showlegend=False
         )
         fig_edge = style_fig(fig_edge)
-
 
         # --- HISTOGRAMA PNL ---
         def apply_square_root_rule(df_subset, cat_name):
@@ -1079,30 +1084,16 @@ global_modals = html.Div([
     dbc.Modal([dbc.ModalHeader("REGISTRO DE USUARIO", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), dbc.ModalBody([dbc.Input(id="reg-u", placeholder="Usuario", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-p", placeholder="Contraseña", type="password", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-n", placeholder="Nombre Completo", style=INPUT_STYLE), html.Div(id="reg-msg", className="text-danger mt-2")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-reg", color="dark", className="ms-auto", style={"fontFamily": "Consolas"}), dbc.Button("ACEPTAR", id="do-reg", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "Consolas", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-reg", is_open=False),
     dbc.Modal([dbc.ModalHeader("CONFIGURACION DE ESTRATEGIA", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), dbc.ModalBody([dag.AgGrid(id="conf-grid", columnDefs=[{"field": "Parametro", "editable": True}, {"field": "Opciones", "editable": True, "flex": 1}], rowData=[], dashGridOptions={"rowSelection": "single", "stopEditingWhenCellsLoseFocus": True}, className="ag-theme-alpine-dark", style={"height": "300px", "borderRadius": "4px", **CUSTOM_GRID_STYLE}), dbc.Button("AGREGAR PARAMETRO", id="add-row-btn", color="dark", outline=True, size="sm", className="mt-3 w-100", style={"fontFamily": "Consolas"}), html.Div(id="config-feedback", className="mt-2 text-warning small")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-config", color="dark", className="ms-auto", style={"fontFamily": "Consolas"}), dbc.Button("GUARDAR", id="save-config", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "Consolas", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-config", is_open=False, size="lg")
 ])
-"""
-app.layout = html.Div([
-    dcc.Store(id='session-store', storage_type='session'),
-    dcc.Store(id='selected-trade-store'),
-    dcc.Store(id='perf-prices-cache', storage_type='session'),  # <-- AGREGAR ESTA LÍNEA
-    dcc.Location(id='url', refresh=False),
-    ...
-])
-"""
+
 def layout_login():
-    return dbc.Row([dbc.Col(dbc.Card([dbc.CardBody([html.H2("Edge Journal", className="text-center mb-4 fw-bold", style={"color": TEXT_MAIN, "letterSpacing": "2px"}), dbc.Input(id="user-in", placeholder="Usuario", className="mb-3 p-3", style=INPUT_STYLE), dbc.Input(id="pass-in", placeholder="Password", type="password", className="mb-4 p-3", style=INPUT_STYLE), dbc.Button("INICIAR SESION", id="login-btn", color="success", className="w-100 mb-3 p-3 fw-bold", style={"backgroundColor": COLOR_POS, "color": "#000", "border": "none", "fontFamily": "Consolas"}), dbc.Button("Crear Cuenta", id="open-reg", color="link", className="w-100 text-decoration-none", style={"color": COLOR_NEUTRAL, "fontFamily": "Consolas"})])], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 20px 40px rgba(0,0,0,0.4)"}), width={"size": 4, "offset": 4}, className="mt-5 pt-5")])
+    return dbc.Row([dbc.Col(dbc.Card([dbc.CardBody([html.H2("EDGE PRO", className="text-center mb-4 fw-bold", style={"color": TEXT_MAIN, "letterSpacing": "2px"}), dbc.Input(id="user-in", placeholder="Usuario", className="mb-3 p-3", style=INPUT_STYLE), dbc.Input(id="pass-in", placeholder="Password", type="password", className="mb-4 p-3", style=INPUT_STYLE), dbc.Button("INICIAR SESION", id="login-btn", color="success", className="w-100 mb-3 p-3 fw-bold", style={"backgroundColor": COLOR_POS, "color": "#000", "border": "none", "fontFamily": "Consolas"}), dbc.Button("Crear Cuenta", id="open-reg", color="link", className="w-100 text-decoration-none", style={"color": COLOR_NEUTRAL, "fontFamily": "Consolas"})])], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 20px 40px rgba(0,0,0,0.4)"}), width={"size": 4, "offset": 4}, className="mt-5 pt-5")])
 
 def layout_dashboard(username):
     return html.Div([
-        # --- CABECERA SUPERIOR (NUEVO ALINEAMIENTO) ---
         dbc.Row([
-            dbc.Col(html.Div(f"USER: {username}", style={"color": COLOR_NEUTRAL, "fontSize": "14px", "fontWeight": "bold"}), width=2), 
-            
-            # --- AQUÍ VAN A VIVIR LAS PÍLDORAS AHORA ---
-            dbc.Col(html.Div(id="top-market-pills", style={"minHeight": "32px"}), width=7),
-            
-            dbc.Col(html.Div(id="g-msg", className="text-end fw-bold", style={"color": COLOR_NEUTRAL}), width=3)
-        ], className="mb-4 mt-2 align-items-center"), 
-        # ----------------------------------------------
+            dbc.Col(html.Div(f"USER: {username}", style={"color": COLOR_NEUTRAL, "fontSize": "14px", "fontWeight": "bold", "marginTop": "10px"}), width=6), 
+            dbc.Col(html.Div(id="g-msg", className="text-end fw-bold", style={"color": COLOR_NEUTRAL}), width=6)
+        ], className="mb-4 mt-1"), 
         
         dcc.Tabs(id="tabs", value='tab-active', children=[
             dcc.Tab(label='OPERATIVA', value='tab-active', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE), 
@@ -1119,17 +1110,13 @@ def layout_dashboard(username):
 app.layout = html.Div([
     dcc.Store(id='session-store', storage_type='session'),
     dcc.Store(id='selected-trade-store'),
-    
-    # --- AQUÍ DEBES AGREGAR ESTA LÍNEA MÁGICA ---
     dcc.Store(id='perf-prices-cache', storage_type='session'),
-    # -------------------------------------------
-    
     dcc.Location(id='url', refresh=False),
     global_modals,
     dbc.Container([
         dbc.Row([
             # CAMBIO AQUI: Quitamos 'fw-bold' y agregamos 'fontWeight': 'normal'
-            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8),
+            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8), 
             dbc.Col([
                 dbc.Button("CONFIG. ESTRATEGIA", id="open-config-btn", color="dark", className="me-3 fw-bold", style={"border": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), 
                 dbc.Button("SALIR", id="logout-btn", color="dark", outline=True, className="fw-bold", style={"fontFamily": "Consolas", "color": COLOR_NEUTRAL, "borderColor": BORDER_COLOR})
@@ -1139,7 +1126,7 @@ app.layout = html.Div([
     ], fluid=True, style={"maxWidth": "1600px"})
 ], style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "fontFamily": "Consolas, monospace", "color": TEXT_MAIN, "paddingBottom": "50px"})
 
-#app.validation_layout = html.Div([app.layout, layout_login(), layout_dashboard("User"), global_modals, get_management_panel()])
+app.validation_layout = html.Div([app.layout, layout_login(), layout_dashboard("User"), global_modals, get_management_panel()])
 
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1219,15 +1206,7 @@ def render_tab(tab, session):
     
     if tab == 'tab-active':
         df = db.get_open_trades(user)
-        
-        # --- AGREGAMOS ESTA VARIABLE ---
-        tickers_list = [] 
-        
-        if not df.empty: 
-            df = calculate_live_metrics(df)
-            # --- Y OBTENEMOS LOS TICKERS ---
-            tickers_list = [str(t).upper() for t in df['symbol'].unique() if pd.notna(t)]
-            
+        if not df.empty: df = calculate_live_metrics(df)
         dyn_inputs = []
         if isinstance(conf, dict):
             dyn_inputs.append(html.Hr(style={"borderColor": BORDER_COLOR}))
@@ -1259,10 +1238,8 @@ def render_tab(tab, session):
                 get_management_panel()
             ], width=5), 
             dbc.Col([
-                # Devolvemos el título simple a la tabla
                 html.H5("POSICIONES ACTIVAS", className="fw-bold mb-3", style={"color": TEXT_MAIN}), 
-                
-                html.Div(dag.AgGrid(id="open-grid", rowData=format_df(df, conf), columnDefs=cols, dashGridOptions={"rowSelection": "single"}, className="ag-theme-alpine-dark", style={"height": "350px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"}),
+                html.Div(dag.AgGrid(id="open-grid", rowData=format_df(df, conf), columnDefs=cols, dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 10}, className="ag-theme-alpine-dark", style={"height": "350px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"}),
                 html.Hr(style={"borderColor": BORDER_COLOR, "margin": "30px 0"}),
                 dbc.Row([
                     dbc.Col(html.H5("EXPOSICION LIVE", className="fw-bold mb-3", style={"color": TEXT_MAIN}), width=8),
@@ -1307,7 +1284,7 @@ def render_tab(tab, session):
                 
                 dbc.Col(html.Div(id="hist-msg", className="small mt-2 fw-bold", style={"color": TEXT_MAIN}), width="auto")
             ], className="mb-4 align-items-center"), 
-            html.Div(dag.AgGrid(id="history-grid", rowData=format_df(df, conf), columnDefs=cols, dashGridOptions={"rowSelection": "single"}, className="ag-theme-alpine-dark", style={"height": "650px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"})
+            html.Div(dag.AgGrid(id="history-grid", rowData=format_df(df, conf), columnDefs=cols, dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 25, "paginationPageSizeSelector": [10, 25, 50, 100]}, className="ag-theme-alpine-dark", style={"height": "650px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"})
         ])
 
     elif tab == 'tab-analytics':
@@ -1368,15 +1345,15 @@ def render_tab(tab, session):
         ])
     
     elif tab == 'tab-performance':
-        # Leemos el capital para mostrarlo
+        # Leemos el capital configurado en Analytics
         current_cap = conf.get('initial_balance', 10000)
         
         return dbc.Container([
-            # Controles (Sin Título, solo el botón y el info de capital)
+            # Controles (Sin input de capital, solo info y botón)
             dbc.Row([
                 dbc.Col([
                     html.P(f"Base Capital: ${current_cap:,.0f}", 
-                           style={"color": COLOR_NEUTRAL, "fontSize": "0.9rem", "marginTop": "20px"})
+                           style={"color": COLOR_NEUTRAL, "fontSize": "0.9rem", "marginTop": "20px", "fontFamily": "Consolas, monospace"})
                 ], width=8),
                 
                 dbc.Col([
@@ -1395,7 +1372,7 @@ def render_tab(tab, session):
             # Selector de Periodo
             dbc.Row([
                 dbc.Col([
-                    dbc.Label("SELECCIONAR PERIODO:", style={"color": COLOR_NEUTRAL, "fontSize": "0.75rem", "fontWeight": "bold"}),
+                    dbc.Label("SELECCIONAR PERIODO:", style={"color": COLOR_NEUTRAL, "fontSize": "0.75rem", "fontWeight": "bold", "fontFamily": "Consolas, monospace"}),
                     dbc.RadioItems(
                         id="perf-period-selector",
                         options=[
@@ -1414,11 +1391,17 @@ def render_tab(tab, session):
                 ], width=12, className="text-center mb-4")
             ]),
 
+            # LOADING WRAPPER para todo el contenido
             dcc.Loading(
-                id="loading-performance", type="circle", color=COLOR_POS,
+                id="loading-performance", 
+                type="circle", 
+                color=COLOR_POS,
                 children=html.Div([
+                    # KPIs Container
                     html.Div(id="perf-kpis-container", style={"marginBottom": "25px"}),
-                    html.Div(id="perf-status", style={"marginBottom": "15px"}),
+                    
+                    # Status messages
+                    html.Div(id="perf-status", style={"marginBottom": "15px", "color": COLOR_NEUTRAL}),
         
                     # Gráfico 1: Retorno (Grande)
                     dbc.Row([
@@ -1522,17 +1505,7 @@ def render_tab(tab, session):
                                         html.Li("Cálculo de fracción óptima de riesgo (f de Kelly) que maximiza retornos geométricos."),
                                         html.Li("Simulaciones de Montecarlo para conocer la distribución de retornos y máximo drawdown de los distintos escenarios que se pueden dar en base a nuestras métricas operativas y, en base a eso, determinar un nivel de riesgo por posición que se adapte a nuestros objetivos.")
                                     ])
-                                ], title="4. SIMULADOR DE RIESGO"),
-
-                                dbc.AccordionItem([
-                                    html.P("Evaluación avanzada del rendimiento del portafolio frente al mercado (Benchmark):"),
-                                    html.Ul([
-                                        html.Li("Visualizar el Retorno Acumulado y la evolución del Drawdown en distintos periodos (YTD, Año Anterior, Histórico Completo)."),
-                                        html.Li("Comparar métricas de desempeño y caídas directamente contra el S&P 500 (SPY)."),
-                                        html.Li("Medir la calidad del retorno con métricas de riesgo ajustadas como Sharpe, Sortino, Alpha de Jensen y Beta.")
-                                    ])
-                                ], title="5. PERFORMANCE")
-
+                                ], title="4. SIMULADOR DE RIESGO")
                             ], start_collapsed=True, flush=True)
                         ])
                     ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "marginBottom": "20px"}),
@@ -1548,6 +1521,7 @@ def render_tab(tab, session):
                                     html.P([html.B("Short:"), " (P. Entrada - P. Salida) * Cantidad"])
                                 ], title="PnL (Profit and Loss)"),
 
+                                # --- NUEVO ITEM: UNIDAD DE RIESGO ---
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Medida estandarizada del riesgo inicial asumido en una operación."]),
                                     html.P([html.B("Cálculo:"), " 1R = |Precio Entrada - Stop Loss|"]),
@@ -1559,6 +1533,7 @@ def render_tab(tab, session):
                                     html.P([html.B("Fórmula:"), " Equity_actual = Balance_inicial + Suma(PnL)"])
                                 ], title="Equity Curve"),
 
+                                # --- MODIFICADO: WIN RATE / LOSS RATE ---
                                 dbc.AccordionItem([
                                     html.P([html.B("Win Rate:"), " % de operaciones ganadoras respecto al total (sin contar Break Even)."]),
                                     html.P([html.B("Loss Rate:"), " % de operaciones perdedoras respecto al total (sin contar Break Even)."])
@@ -1569,6 +1544,7 @@ def render_tab(tab, session):
                                     html.P([html.B("Fórmula:"), " B = Avg Win ($) / |Avg Loss ($)|"])
                                 ], title="Ratio Riesgo/Beneficio Histórico"),
 
+                                # --- MODIFICADO: ESPERANZA MATEMATICA ---
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Valor promedio esperado por cada operación a largo plazo."]),
                                     html.P("Si es positiva, el sistema es rentable."),
@@ -1591,42 +1567,13 @@ def render_tab(tab, session):
 
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Tasa a la cual crece el capital compuesto dado un riesgo 'f'."]),
-                                    html.P([html.B("Fórmula:"), " G(f) = [(1 + f*B)^W * (1 - f)^L] - 1"]),
-                                    html.Ul([
-                                        html.Li([html.B("W:"), " Win rate (Tasa de aciertos)."]),
-                                        html.Li([html.B("L:"), " Loss rate (Tasa de pérdidas)."]),
-                                        html.Li([html.B("B:"), " Ratio Riesgo / Beneficio."])
-                                    ])
+                                    html.P([html.B("Fórmula:"), " G(f) = [(1 + f*B)^W * (1 - f)^L] - 1"])
                                 ], title="Tasa de Crecimiento Geométrico G(f)"),
 
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Mayor caída porcentual desde un pico histórico hasta un valle."]),
                                     html.P([html.B("Fórmula:"), " (Valle - Pico Previo) / Pico Previo"])
                                 ], title="Máximo Drawdown (MDD)"),
-
-                                dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Tiempo (medido en días) que el portafolio pasa en estado de Drawdown."]),
-                                    html.P("Cuenta los días desde que el capital cae por debajo de su último máximo histórico hasta que logra superarlo nuevamente."),
-                                    html.P("Es una medida clave para entender la paciencia y disciplina requerida por un sistema.")
-                                ], title="Time Under Water (TUW)"),
-
-                                dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Mide el rendimiento adicional generado por cada unidad de riesgo (volatilidad total) asumida."]),
-                                    html.P([html.B("Fórmula:"), " (Retorno Anualizado - Tasa Libre de Riesgo) / Desviación Estándar de los Retornos."]),
-                                    html.P("Un Sharpe superior a 1.0 se considera bueno; mayor a 2.0 es excelente.")
-                                ], title="Sharpe Ratio"),
-
-                                dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Similar al Sharpe Ratio, pero solo penaliza la volatilidad negativa (caídas)."]),
-                                    html.P([html.B("Fórmula:"), " (Retorno Anualizado - Tasa Libre de Riesgo) / Desviación Estándar de Retornos a la baja."]),
-                                    html.P("Suele ser más representativo para traders que buscan asimetría positiva en sus retornos.")
-                                ], title="Sortino Ratio"),
-
-                                dbc.AccordionItem([
-                                    html.P([html.B("Beta (β):"), " Sensibilidad del portafolio frente al mercado (SPY). Un β de 1.2 significa que el portafolio es un 20% más volátil que el mercado."]),
-                                    html.P([html.B("Alpha de Jensen (α):"), " Rendimiento excedente generado por la estrategia que no puede ser explicado por el riesgo sistémico (Beta)."]),
-                                    html.P([html.B("Fórmula Alpha:"), " (Retorno del Portafolio - Tasa Libre) - [ Beta * (Retorno del Mercado - Tasa Libre) ]"])
-                                ], title="Alpha de Jensen & Beta"),
 
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Histograma de frecuencia de resultados monetarios."]),
@@ -1641,22 +1588,8 @@ def render_tab(tab, session):
                             ], start_collapsed=True, flush=True)
                         ])
                     ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}"})
-                ], width=6),
-                
-            ]),
-
-            # --- NUEVA SECCIÓN: FIRMA DE AUTOR ---
-            html.Div([
-                html.Hr(style={"borderColor": BORDER_COLOR, "margin": "30px 0 15px 0"}),
-                html.P([
-                    "Creado por ", html.B("Mirko Gulin"), " | Mail de contacto: ",
-                    html.A("gulinmirko@gmail.com", href="mailto:gulinmirko@gmail.com", style={"color": COLOR_POS, "textDecoration": "none"}),
-                    html.Br(),
-                    "Refina tu edge en Edge Terminal: ",
-                    html.A("https://edge-terminal.streamlit.app/", href="https://edge-terminal.streamlit.app/", target="_blank", style={"color": COLOR_POS, "textDecoration": "none", "fontWeight": "bold"})
-                ])
-            ], className="text-center", style={"fontSize": "0.8rem", "color": COLOR_NEUTRAL, "fontFamily": "Consolas, monospace", "paddingBottom": "20px"})
-            
+                ], width=6)
+            ])
         ])
     return html.Div()
 
@@ -1687,7 +1620,8 @@ def manage_history(n_sel, n_all, selected, session):
 # --- CALLBACKS ANALYTICS ---
 @app.callback([Output("fig-equity", "figure"), Output("fig-dd", "figure"), Output("fig-portfolio", "figure"), Output("fig-edge", "figure"), Output("fig-hist", "figure"), Output("kpi-container", "children"), Output("fig-strategy", "figure"), Output("fig-count", "figure"), Output("fig-evo-winrate", "figure"), Output("fig-evo-ratio", "figure")], [Input("initial-balance-input", "value"), Input("strategy-selector", "value"), Input("session-store", "data")])
 def update_analytics(start_bal, selected_metric, session):
-    if not session: return {}, {}, {}, {}, {}, [], {}, {}, {}, {}
+    if not session: 
+        return {}, {}, {}, {}, {}, [], {}, {}, {}, {}
     try:
         capital_final = float(start_bal[0] if isinstance(start_bal, list) else start_bal)
     except:
@@ -1860,7 +1794,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     if not df_open.empty: df_open = calculate_live_metrics(df_open)
     return "Actualizado.", format_df(df_open, s.get('config', {})), {'display': 'none'}, []
 
-# --- REEMPLAZA DESDE ESTE CALLBACK ---
+# --- CALLBACK PERFORMANCE COMPLETO ---
 @app.callback(
     [
         Output("fig-perf-cumulative", "figure"),
@@ -1871,14 +1805,15 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     ],
     [
         Input("btn-calc-performance", "n_clicks"), 
-        Input("perf-period-selector", "value")
+        Input("perf-period-selector", "value"),
+        Input("tabs", "value")
     ],
     [
         State("session-store", "data"),
         State("perf-prices-cache", "data")
     ]
 )
-def update_performance(n_clicks, period_value, session, cached_prices):
+def update_performance(n_clicks, period_value, active_tab, session, cached_prices):
     """Calcula portfolio con caché de precios para mejor performance."""
     
     empty_fig = go.Figure()
@@ -1890,55 +1825,31 @@ def update_performance(n_clicks, period_value, session, cached_prices):
         yaxis=dict(visible=False)
     )
     
+    if active_tab != 'tab-performance':
+        raise dash.exceptions.PreventUpdate
+    
     if not session:
         return empty_fig, empty_fig, [], "", no_update
     
-    # 1. Configuración
+    # 1. Configuración - USAR CAPITAL DE ANALYTICS
     config = session.get('config', {})
     try:
         initial_balance = float(config.get('initial_balance', 10000))
-        if initial_balance <= 0: 
-            initial_balance = 10000
+        if initial_balance <= 0: initial_balance = 10000
     except: 
         initial_balance = 10000.0
 
     df_closed = db.get_closed_trades(session['user'])
     if df_closed.empty:
-        return empty_fig, empty_fig, [], html.Div("⚠️ Sin historial cerrado.", style={"color": COLOR_SPY}), {}
+        return empty_fig, empty_fig, [], html.Div("⚠️ Sin historial cerrado.", style={"color": COLOR_SPY}), no_update
     
-    # 2. Calcular Portfolio (con o sin cache)
-    print(f"[PERFORMANCE] Cache disponible: {cached_prices is not None and len(cached_prices or {}) > 0}")
-    
+    # 2. Calcular Portfolio
     try:
-        # Convertir cache de dict a Series si existe
-        prices_dict = None
-        if cached_prices:
-            prices_dict = {}
-            for ticker, data in cached_prices.items():
-                try:
-                    prices_dict[ticker] = pd.Series(data['values'], index=pd.to_datetime(data['dates']))
-                except:
-                    pass
-        
-        daily_df, new_prices_dict = build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict)
+        # Usar función simple (sin cache) - es más confiable
+        daily_df = build_daily_portfolio(df_closed, initial_balance)
         
         if daily_df.empty:
             return empty_fig, empty_fig, [], "⚠️ Error calculando portfolio.", no_update
-        
-        # Guardar en cache si es nuevo
-        if not cached_prices and new_prices_dict:
-            cache_to_store = {}
-            for ticker, series in new_prices_dict.items():
-                try:
-                    cache_to_store[ticker] = {
-                        'dates': series.index.strftime('%Y-%m-%d').tolist(),
-                        'values': series.tolist()
-                    }
-                except:
-                    pass
-            print(f"[PERFORMANCE] ✓ Guardando {len(cache_to_store)} tickers en cache")
-        else:
-            cache_to_store = no_update
             
     except Exception as e:
         print(f"[PERFORMANCE] ❌ Error: {e}")
@@ -2099,32 +2010,7 @@ def update_performance(n_clicks, period_value, session, cached_prices):
         showlegend=False, height=250
     )
     
-    return fig_cum, fig_dd, kpis_layout, "", cache_to_store
-# --- CALLBACK GLOBAL: MARKET PILLS EN EL HEADER ---
-@app.callback(
-    Output("top-market-pills", "children"),
-    [Input("tabs", "value"), Input("g-msg", "children")],
-    [State("session-store", "data")]
-)
-def update_top_market_pills(tab, g_msg, session):
-    if not session or 'user' not in session:
-        return html.Div()
-    
-    # Consultamos la base de datos para ver qué operaciones tienes abiertas AHORA mismo
-    df_open = db.get_open_trades(session['user'])
-    tickers_list = []
-    
-    if not df_open.empty:
-        # Extraemos los tickers únicos
-        tickers_list = [str(t).upper() for t in df_open['symbol'].unique() if pd.notna(t)]
-        
-    # Llamamos a la función que descarga Yahoo Finance y dibuja los cuadros
-    return get_market_pills(tickers_list)
+    return fig_cum, fig_dd, kpis_layout, "", no_update
+
 if __name__ == '__main__':
-
     app.run(debug=True)
-
-
-
-
-
