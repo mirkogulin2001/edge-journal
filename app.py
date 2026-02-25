@@ -197,6 +197,146 @@ def safe_float(val):
         elif ',' in s: s = s.replace(',', '.')
         return float(s)
     except: return 0.0
+
+def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None):
+    """
+    Versión optimizada que acepta precios pre-descargados.
+    
+    Args:
+        df_closed: DataFrame con trades cerrados
+        initial_balance: Capital inicial
+        prices_dict: Dict {ticker: pd.Series} con precios ya descargados (opcional)
+    
+    Returns:
+        (daily_df, prices_dict) - DataFrame resultado + dict de precios descargados
+    """
+    if df_closed.empty:
+        return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return']), {}
+    
+    df = df_closed.copy()
+    df['entry_date'] = pd.to_datetime(df['entry_date']).dt.normalize()
+    df['exit_date'] = pd.to_datetime(df['exit_date']).dt.normalize()
+    
+    start_date = df['entry_date'].min().date()
+    end_date = df['exit_date'].max().date()
+    if pd.isna(end_date) or end_date < date.today():
+        end_date = date.today()
+    
+    tickers = list(df['symbol'].unique())
+    
+    # Si no hay precios cacheados, descargarlos
+    if prices_dict is None:
+        print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers...")
+        prices_dict = {}
+        
+        # Descarga en LOTES para ser más eficiente
+        BATCH_SIZE = 10
+        for i in range(0, len(tickers), BATCH_SIZE):
+            batch = tickers[i:i+BATCH_SIZE]
+            try:
+                batch_data = yf.download(
+                    batch,
+                    start=start_date,
+                    end=end_date + timedelta(days=1),
+                    auto_adjust=True,
+                    progress=False,
+                    threads=True  # Descarga paralela
+                )
+                
+                if not batch_data.empty:
+                    if len(batch) == 1:
+                        prices_dict[batch[0]] = batch_data['Close'] if 'Close' in batch_data.columns else batch_data.iloc[:, 0]
+                    else:
+                        for ticker in batch:
+                            try:
+                                if ticker in batch_data['Close'].columns:
+                                    prices_dict[ticker] = batch_data['Close'][ticker]
+                            except:
+                                pass
+                                
+                print(f"[PERFORMANCE] ✓ Descargados {i+len(batch)}/{len(tickers)} tickers")
+            except Exception as e:
+                print(f"[PERFORMANCE] ⚠ Error descargando batch {i}: {e}")
+                continue
+        
+        print(f"[PERFORMANCE] ✓ Descarga completa: {len(prices_dict)}/{len(tickers)} exitosos")
+    else:
+        print(f"[PERFORMANCE] ⚡ Usando precios cacheados ({len(prices_dict)} tickers)")
+    
+    # Construir DataFrame de precios normalizado
+    prices_data = {}
+    for ticker, series in prices_dict.items():
+        if series is not None and not series.empty:
+            series.index = pd.to_datetime(series.index).normalize()
+            prices_data[ticker] = series
+    
+    if not prices_data:
+        return pd.DataFrame(), prices_dict
+    
+    prices = pd.DataFrame(prices_data)
+    
+    # Calcular cash flows REALIZADOS
+    realized_pnl_flows = {}
+    for _, trade in df.iterrows():
+        exit_d = trade['exit_date']
+        if pd.notna(exit_d):
+            if trade['side'] == 'LONG':
+                pnl = (trade['exit_price'] - trade['entry_price']) * trade['quantity']
+            else:
+                pnl = (trade['entry_price'] - trade['exit_price']) * trade['quantity']
+            realized_pnl_flows[exit_d] = realized_pnl_flows.get(exit_d, 0) + pnl
+    
+    # Bucle diario
+    all_dates = prices.index
+    daily_values = []
+    current_realized_cash = initial_balance
+    
+    for day in all_dates:
+        current_realized_cash += realized_pnl_flows.get(day, 0)
+        
+        open_trades = df[
+            (df['entry_date'] <= day) &
+            ((df['exit_date'].isna()) | (df['exit_date'] > day))
+        ]
+        
+        market_value_equity = 0.0
+        invested_capital = 0.0
+        
+        for _, trade in open_trades.iterrows():
+            ticker = trade['symbol']
+            qty = trade['quantity']
+            entry_price = trade['entry_price']
+            trade_cost = qty * entry_price
+            invested_capital += trade_cost
+            
+            if ticker in prices.columns and day in prices.index and pd.notna(prices.loc[day, ticker]):
+                current_price = prices.loc[day, ticker]
+                
+                if trade['side'] == 'LONG':
+                    market_value_equity += current_price * qty
+                else:
+                    pnl_latente = (entry_price - current_price) * qty
+                    market_value_equity += (trade_cost + pnl_latente)
+            else:
+                market_value_equity += trade_cost
+        
+        available_cash = current_realized_cash - invested_capital
+        total_account_value = available_cash + market_value_equity
+        
+        daily_values.append({
+            'date': day,
+            'total_value': total_account_value,
+            'cash': available_cash,
+            'equity_value': market_value_equity
+        })
+    
+    result = pd.DataFrame(daily_values)
+    if not result.empty:
+        result['daily_return'] = result['total_value'].pct_change().fillna(0)
+        result['cumulative_return'] = (result['total_value'] / initial_balance) - 1
+    
+    return result, prices_dict
+
 def build_daily_portfolio(df_closed, initial_balance):
     """
     Calcula el valor diario del portfolio basado en trades históricos.
