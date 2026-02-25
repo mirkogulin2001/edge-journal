@@ -698,18 +698,74 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         fig_evo_ratio.update_layout(title='EVOLUCION RATIO R/B', xaxis_title='Trades', yaxis_title='Ratio', hovermode='x unified', showlegend=False)
         fig_evo_ratio = style_fig(fig_evo_ratio)
 
-        # --- EDGE TEÓRICO ---
-        x_vals = np.linspace(0.15, 0.85, 100)
-        y_be = (0.00 + 1 - x_vals) / x_vals
-        y_good = (0.25 + 1 - x_vals) / x_vals
-        y_exc = (0.50 + 1 - x_vals) / x_vals
+        # --- EDGE EVOLUTION ---
+        # Cálculo del Edge acumulativo: E(x) = (Win Rate × Ratio) - Loss Rate
+        # Convertimos win_rate y loss_rate de porcentaje a decimal
+        df_closed['cum_edge'] = (df_closed['cum_win_rate'] / 100) * df_closed['cum_ratio'] - (df_closed['cum_loss_rate'] / 100)
         
         fig_edge = go.Figure()
-        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_be, mode='lines', name='Break Even (E=0)', line=dict(color=COLOR_NEG, width=2), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)'))
-        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_good, mode='lines', name='Bueno (E=0.25)', line=dict(color=COLOR_SPY, width=2), fill='tonexty', fillcolor='rgba(252, 213, 53, 0.2)'))
-        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_exc, mode='lines', name='Excelente (E=0.5)', line=dict(color=COLOR_POS, width=2), fill='tonexty', fillcolor='rgba(0, 176, 189, 0.2)'))
-        fig_edge.add_trace(go.Scatter(x=[win_rate], y=[ratio_money], mode='markers+text', name='Tu Sistema', marker=dict(color=TEXT_MAIN, size=10, line=dict(color=TEXT_MAIN, width=2)), text=['TU SISTEMA'], textposition='top right', textfont=dict(color=TEXT_MAIN, size=12)))
-        fig_edge.update_layout(title='EDGE TEORICO', xaxis_title='Win Rate (%)', yaxis_title='Ratio R/B', yaxis=dict(range=[0, max(7, ratio_r + 1)]), xaxis=dict(range=[15, 85]), hovermode='x unified', legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0)"))
+        
+        # Crear dos traces separados para el fill positivo y negativo
+        # 1. Área ROJA (cuando Edge < 0)
+        edge_negative = df_closed['cum_edge'].copy()
+        edge_negative[edge_negative > 0] = 0  # Solo valores negativos
+        
+        fig_edge.add_trace(go.Scatter(
+            x=df_closed['trade_num'], 
+            y=edge_negative, 
+            mode='lines',
+            line=dict(width=0),
+            fill='tozeroy',
+            fillcolor='rgba(246, 70, 93, 0.3)',
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        
+        # 2. Área VERDE (cuando Edge > 0)
+        edge_positive = df_closed['cum_edge'].copy()
+        edge_positive[edge_positive < 0] = 0  # Solo valores positivos
+        
+        fig_edge.add_trace(go.Scatter(
+            x=df_closed['trade_num'], 
+            y=edge_positive, 
+            mode='lines',
+            line=dict(width=0),
+            fill='tozeroy',
+            fillcolor='rgba(0, 176, 189, 0.3)',
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        
+        # 3. Línea principal del Edge
+        fig_edge.add_trace(go.Scatter(
+            x=df_closed['trade_num'], 
+            y=df_closed['cum_edge'], 
+            mode='lines', 
+            name='Edge', 
+            line=dict(color=TEXT_MAIN, width=3),
+            hovertemplate='Trade: %{x}<br>Edge: %{y:.3f}<extra></extra>'
+        ))
+        
+        # 4. Línea horizontal en y=0
+        fig_edge.add_hline(
+            y=0, 
+            line_color=COLOR_NEUTRAL, 
+            line_width=2,
+            line_dash='dash',
+            opacity=0.7,
+            annotation_text='Break Even',
+            annotation_position='right',
+            annotation_font_color=COLOR_NEUTRAL,
+            annotation_font_size=10
+        )
+        
+        fig_edge.update_layout(
+            title='EVOLUCIÓN DEL EDGE',
+            xaxis_title='Trades',
+            yaxis_title='Edge = (W × R/B) - L',
+            hovermode='x unified',
+            showlegend=False
+        )
         fig_edge = style_fig(fig_edge)
 
         # --- HISTOGRAMA PNL ---
@@ -909,6 +965,7 @@ def layout_dashboard(username):
 app.layout = html.Div([
     dcc.Store(id='session-store', storage_type='session'),
     dcc.Store(id='selected-trade-store'),
+    dcc.Store(id='perf-prices-cache', storage_type='session'),
     dcc.Location(id='url', refresh=False),
     global_modals,
     dbc.Container([
