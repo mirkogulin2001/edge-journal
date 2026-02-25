@@ -1803,6 +1803,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     if not df_open.empty: df_open = calculate_live_metrics(df_open)
     return "Actualizado.", format_df(df_open, s.get('config', {})), {'display': 'none'}, []
 
+# --- REEMPLAZA DESDE ESTE CALLBACK ---
 @app.callback(
     [
         Output("fig-perf-cumulative", "figure"),
@@ -1813,7 +1814,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     ],
     [
         Input("btn-calc-performance", "n_clicks"), 
-        Input("tabs", "value"),
+        # ELIMINAMOS Input("tabs", "value") DE AQUÍ
         Input("perf-period-selector", "value")
     ],
     [
@@ -1821,7 +1822,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
         State("perf-prices-cache", "data")
     ]
 )
-def update_performance(n_clicks, active_tab, period_value, session, cached_prices):
+def update_performance(n_clicks, period_value, session, cached_prices):  # <-- ELIMINAMOS active_tab DE AQUÍ
     """Calcula portfolio con caché de precios para mejor performance."""
     
     empty_fig = go.Figure()
@@ -1833,8 +1834,15 @@ def update_performance(n_clicks, active_tab, period_value, session, cached_price
         yaxis=dict(visible=False)
     )
     
-    if active_tab != 'tab-performance' or not session:
+    # <-- ELIMINAMOS LA RESTRICCIÓN DE active_tab != 'tab-performance'
+    if not session:
         return empty_fig, empty_fig, [], "", no_update
+    
+    # 1. Configuración
+    # (A PARTIR DE AQUÍ TU CÓDIGO SIGUE EXACTAMENTE IGUAL)
+    config = session.get('config', {})
+    try:
+        initial_balance = float(config.get('initial_balance', 10000))
     
     # 1. Configuración
     config = session.get('config', {})
@@ -2065,6 +2073,7 @@ def update_top_market_pills(tab, g_msg, session):
 if __name__ == '__main__':
 
     app.run(debug=True)
+
 
 
 
