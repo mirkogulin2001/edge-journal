@@ -1809,7 +1809,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
         Output("fig-perf-drawdown", "figure"),
         Output("perf-kpis-container", "children"),
         Output("perf-status", "children"),
-        Output("perf-prices-cache", "data")  # <-- NUEVO: Guardamos precios
+        Output("perf-prices-cache", "data")
     ],
     [
         Input("btn-calc-performance", "n_clicks"), 
@@ -1818,7 +1818,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     ],
     [
         State("session-store", "data"),
-        State("perf-prices-cache", "data")  # <-- NUEVO: Leemos cache
+        State("perf-prices-cache", "data")
     ]
 )
 def update_performance(n_clicks, active_tab, period_value, session, cached_prices):
@@ -1934,13 +1934,113 @@ def update_performance(n_clicks, active_tab, period_value, session, cached_price
     if period_df.empty: 
         return empty_fig, empty_fig, [], html.Div(f"⚠️ Sin datos para {period_label}", style={"color": "orange"}), cache_to_store
 
-    # 5-7. Métricas, KPIs y Gráficos (EL RESTO DEL CÓDIGO SIGUE IGUAL)
-    # [... Copiar todo el código desde "# 5. Métricas y Normalización" hasta el return final ...]
+    # 5. Métricas y Normalización
+    period_start_value = period_df['total_value'].iloc[0]
+    period_df['norm_port'] = ((period_df['total_value'] / period_start_value) - 1) * 100
     
-    # Por brevedad, aquí va TODO el código de métricas y gráficos que ya tenías
-    # Solo cambio el return final para incluir cache_to_store:
+    if 'spy_price' in period_df.columns and not period_df['spy_price'].isnull().all():
+        spy_start = period_df['spy_price'].iloc[0]
+        period_df['norm_spy'] = ((period_df['spy_price'] / spy_start) - 1) * 100
+    else:
+        period_df['norm_spy'] = 0.0
+
+    # Drawdowns
+    dd_port_raw = (period_df['total_value'] / period_df['total_value'].cummax()) - 1
+    max_dd_port = dd_port_raw.min() * 100
     
-    # AL FINAL DEL CALLBACK:
+    dd_spy_raw = (period_df['spy_price'] / period_df['spy_price'].cummax()) - 1
+    max_dd_spy = dd_spy_raw.min() * 100
+
+    # Retornos Diarios
+    port_rets = period_df['total_value'].pct_change().fillna(0)
+    spy_rets = period_df['spy_price'].pct_change().fillna(0)
+    rfr_daily = 0.04 / 252
+    
+    # Sharpe
+    def calc_sharpe(rets):
+        if rets.std() == 0: return 0
+        return np.sqrt(252) * (rets.mean() - rfr_daily) / rets.std()
+        
+    # Sortino
+    def calc_sortino(rets):
+        downside = rets[rets < 0]
+        if len(downside) < 2: return 0
+        down_std = downside.std()
+        if down_std == 0: return 0
+        return np.sqrt(252) * (rets.mean() - rfr_daily) / down_std
+    
+    sharpe_port = calc_sharpe(port_rets)
+    sharpe_spy = calc_sharpe(spy_rets)
+    sortino_port = calc_sortino(port_rets)
+    sortino_spy = calc_sortino(spy_rets)
+    
+    # Alpha y Beta
+    try:
+        cov = np.cov(port_rets, spy_rets)
+        beta = cov[0, 1] / cov[1, 1]
+        alpha = (port_rets.mean() - rfr_daily) - beta * (spy_rets.mean() - rfr_daily)
+        alpha *= 252 * 100
+    except:
+        beta, alpha = 1.0, 0.0
+
+    # Time Under Water
+    is_underwater = dd_port_raw < -0.0001
+    g = (is_underwater != is_underwater.shift()).cumsum()
+    underwater_streaks = is_underwater.groupby(g).sum()
+    streaks = underwater_streaks[underwater_streaks > 0]
+    max_tuw = streaks.max() if not streaks.empty else 0
+    avg_tuw = streaks.mean() if not streaks.empty else 0
+
+    # 6. KPIs
+    def make_perf_card(title, main_val_str, sub_text=None, m_color=None):
+        v_style = KPI_VAL_STYLE.copy()
+        v_style['fontWeight'] = 'normal'
+        if m_color: v_style['color'] = m_color
+        
+        content = [
+            html.P(main_val_str, style=v_style),
+            html.P(title, style=KPI_LBL_STYLE)
+        ]
+        
+        if sub_text:
+            content.append(html.P(sub_text, style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "marginTop": "6px", "marginBottom": "0", "fontFamily": "Consolas, monospace"}))
+            
+        return dbc.Col(html.Div(content, style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
+
+    kpis_layout = html.Div(dbc.Row([
+        make_perf_card("RETORNO", f"{period_df['norm_port'].iloc[-1]:+.2f}%", f"SPY: {period_df['norm_spy'].iloc[-1]:+.2f}%", COLOR_POS if period_df['norm_port'].iloc[-1] >= 0 else COLOR_NEG),
+        make_perf_card("MAX DRAWDOWN", f"{max_dd_port:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
+        make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
+        make_perf_card("SORTINO RATIO", f"{sortino_port:.2f}", f"SPY: {sortino_spy:.2f}", TEXT_MAIN),
+        make_perf_card("ALPHA (JENSEN)", f"α {alpha:+.2f}%", "Exceso vs Riesgo", COLOR_SPY),
+        make_perf_card("BETA", f"β {beta:.2f}", "Sensibilidad vs SPY", TEXT_MAIN),
+        make_perf_card("TIME UNDER WATER", f"{max_tuw:.0f} Max", f"{avg_tuw:.0f} Promedio (Días)", COLOR_NEG if max_tuw > 0 else TEXT_MAIN),
+        make_perf_card("DÍAS OPERADOS", f"{len(period_df)}", period_label, TEXT_MAIN)
+    ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
+
+    # 7. Gráficos
+    fig_cum = go.Figure()
+    fig_cum.add_trace(go.Scatter(x=period_df['date'], y=period_df['norm_spy'], mode='lines', line=dict(color='#555555', width=1, dash='dash'), name='SPY'))
+    fig_cum.add_trace(go.Scatter(x=period_df['date'], y=period_df['norm_port'], mode='lines', line=dict(color=COLOR_POS, width=2), fill='tozeroy', fillcolor=f'rgba(0, 176, 189, 0.1)', name='Portfolio'))
+    fig_cum.add_hline(y=0, line_color=COLOR_NEUTRAL, opacity=0.3)
+    fig_cum.update_layout(
+        title={'text': f'RETORNO ACUMULADO - {period_label}', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.05, 'xanchor': 'left'},
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
+        hovermode='x unified', margin=dict(l=40, r=20, t=40, b=10),
+        yaxis=dict(showgrid=True, gridcolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(showgrid=False, gridcolor=BORDER_COLOR),
+        legend=dict(orientation="h", y=1.02, x=1, xanchor="right"), height=450
+    )
+
+    fig_dd = go.Figure()
+    fig_dd.add_trace(go.Scatter(x=period_df['date'], y=dd_port_raw*100, mode='lines', line=dict(color=COLOR_NEG, width=1), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)', name='Drawdown'))
+    fig_dd.update_layout(
+        title={'text': 'EVOLUCIÓN DEL DRAWDOWN', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.05, 'xanchor': 'left'},
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
+        hovermode='x unified', margin=dict(l=40, r=20, t=40, b=40),
+        yaxis=dict(showgrid=True, gridcolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(showgrid=False, gridcolor=BORDER_COLOR),
+        showlegend=False, height=250
+    )
+    
     return fig_cum, fig_dd, kpis_layout, "", cache_to_store
 # --- CALLBACK GLOBAL: MARKET PILLS EN EL HEADER ---
 @app.callback(
@@ -1965,4 +2065,5 @@ def update_top_market_pills(tab, g_msg, session):
 if __name__ == '__main__':
 
     app.run(debug=True)
+
 
