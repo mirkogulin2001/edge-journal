@@ -1082,7 +1082,7 @@ app.layout = html.Div([
     ], fluid=True, style={"maxWidth": "1600px"})
 ], style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "fontFamily": "Consolas, monospace", "color": TEXT_MAIN, "paddingBottom": "50px"})
 
-app.validation_layout = html.Div([app.layout, layout_login(), layout_dashboard("User"), global_modals, get_management_panel()])
+#app.validation_layout = html.Div([app.layout, layout_login(), layout_dashboard("User"), global_modals, get_management_panel()])
 
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -2065,5 +2065,6 @@ def update_top_market_pills(tab, g_msg, session):
 if __name__ == '__main__':
 
     app.run(debug=True)
+
 
 
