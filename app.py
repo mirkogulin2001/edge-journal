@@ -1814,7 +1814,6 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     ],
     [
         Input("btn-calc-performance", "n_clicks"), 
-        # ELIMINAMOS Input("tabs", "value") DE AQUÍ
         Input("perf-period-selector", "value")
     ],
     [
@@ -1822,7 +1821,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
         State("perf-prices-cache", "data")
     ]
 )
-def update_performance(n_clicks, period_value, session, cached_prices):  # <-- ELIMINAMOS active_tab DE AQUÍ
+def update_performance(n_clicks, period_value, session, cached_prices):
     """Calcula portfolio con caché de precios para mejor performance."""
     
     empty_fig = go.Figure()
@@ -1834,21 +1833,15 @@ def update_performance(n_clicks, period_value, session, cached_prices):  # <-- E
         yaxis=dict(visible=False)
     )
     
-    # <-- ELIMINAMOS LA RESTRICCIÓN DE active_tab != 'tab-performance'
     if not session:
         return empty_fig, empty_fig, [], "", no_update
     
     # 1. Configuración
-    # (A PARTIR DE AQUÍ TU CÓDIGO SIGUE EXACTAMENTE IGUAL)
     config = session.get('config', {})
     try:
         initial_balance = float(config.get('initial_balance', 10000))
-    
-    # 1. Configuración
-    config = session.get('config', {})
-    try:
-        initial_balance = float(config.get('initial_balance', 10000))
-        if initial_balance <= 0: initial_balance = 10000
+        if initial_balance <= 0: 
+            initial_balance = 10000
     except: 
         initial_balance = 10000.0
 
@@ -2073,6 +2066,7 @@ def update_top_market_pills(tab, g_msg, session):
 if __name__ == '__main__':
 
     app.run(debug=True)
+
 
 
 
