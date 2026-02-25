@@ -1406,10 +1406,10 @@ def manage_history(n_sel, n_all, selected, session):
     return no_update, ""
 
 # --- CALLBACKS ANALYTICS ---
-@app.callback([Output("fig-equity", "figure"), Output("fig-dd", "figure"), Output("fig-portfolio", "figure"), Output("fig-edge", "figure"), Output("fig-hist", "figure"), Output("kpi-container", "children"), Output("fig-strategy", "figure"), Output("fig-count", "figure"), Output("fig-evo-winrate", "figure"), Output("fig-evo-ratio", "figure")], [Input("initial-balance-input", "value"), Input("strategy-selector", "value"), Input("session-store", "data")], prevent_initial_call=True)
+@app.callback([Output("fig-equity", "figure"), Output("fig-dd", "figure"), Output("fig-portfolio", "figure"), Output("fig-edge", "figure"), Output("fig-hist", "figure"), Output("kpi-container", "children"), Output("fig-strategy", "figure"), Output("fig-count", "figure"), Output("fig-evo-winrate", "figure"), Output("fig-evo-ratio", "figure")], [Input("initial-balance-input", "value"), Input("strategy-selector", "value"), Input("session-store", "data")])
 def update_analytics(start_bal, selected_metric, session):
     if not session: 
-        raise dash.exceptions.PreventUpdate
+        return {}, {}, {}, {}, {}, [], {}, {}, {}, {}
     try:
         capital_final = float(start_bal[0] if isinstance(start_bal, list) else start_bal)
     except:
@@ -1620,7 +1620,7 @@ def update_performance(n_clicks, active_tab, initial_balance, session):
     
     # No ejecutar si no estamos en la pestaña correcta
     if active_tab != 'tab-performance':
-        return empty_fig, empty_fig, [], ""
+        raise dash.exceptions.PreventUpdate
     
     if not session:
         return empty_fig, empty_fig, [], ""
