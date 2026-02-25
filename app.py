@@ -275,24 +275,30 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
     
     prices = pd.DataFrame(prices_data)
     
-    # Calcular cash flows REALIZADOS
-    realized_pnl_flows = {}
+    # Calcular cash flows (ENTRADAS Y SALIDAS)
+    cash_flows = {}
+    
     for _, trade in df.iterrows():
+        # SALIDA DE CASH: Cuando entras al trade (compras)
+        entry_d = trade['entry_date']
+        if pd.notna(entry_d):
+            entry_cost = trade['entry_price'] * trade['quantity']
+            cash_flows[entry_d] = cash_flows.get(entry_d, 0) - entry_cost  # Resta el costo
+        
+        # ENTRADA DE CASH: Cuando cierras el trade (vendes)
         exit_d = trade['exit_date']
         if pd.notna(exit_d):
-            if trade['side'] == 'LONG':
-                pnl = (trade['exit_price'] - trade['entry_price']) * trade['quantity']
-            else:
-                pnl = (trade['entry_price'] - trade['exit_price']) * trade['quantity']
-            realized_pnl_flows[exit_d] = realized_pnl_flows.get(exit_d, 0) + pnl
+            exit_proceeds = trade['exit_price'] * trade['quantity']
+            cash_flows[exit_d] = cash_flows.get(exit_d, 0) + exit_proceeds  # Suma lo recaudado
     
     # Bucle diario
     all_dates = prices.index
     daily_values = []
-    current_realized_cash = initial_balance
+    current_cash = initial_balance  # Cash que va cambiando día a día
     
     for day in all_dates:
-        current_realized_cash += realized_pnl_flows.get(day, 0)
+        # Aplicar flujos de efectivo de este día
+        current_cash += cash_flows.get(day, 0)
         
         open_trades = df[
             (df['entry_date'] <= day) &
@@ -300,14 +306,11 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
         ]
         
         market_value_equity = 0.0
-        invested_capital = 0.0
         
         for _, trade in open_trades.iterrows():
             ticker = trade['symbol']
             qty = trade['quantity']
             entry_price = trade['entry_price']
-            trade_cost = qty * entry_price
-            invested_capital += trade_cost
             
             if ticker in prices.columns and day in prices.index and pd.notna(prices.loc[day, ticker]):
                 current_price = prices.loc[day, ticker]
@@ -315,18 +318,20 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
                 if trade['side'] == 'LONG':
                     market_value_equity += current_price * qty
                 else:
+                    # SHORT: Valor = Capital Inicial + PnL Latente
+                    trade_cost = entry_price * qty
                     pnl_latente = (entry_price - current_price) * qty
                     market_value_equity += (trade_cost + pnl_latente)
             else:
-                market_value_equity += trade_cost
+                # Si no hay precio, usar entry price
+                market_value_equity += entry_price * qty
         
-        available_cash = current_realized_cash - invested_capital
-        total_account_value = available_cash + market_value_equity
+        total_account_value = current_cash + market_value_equity
         
         daily_values.append({
             'date': day,
             'total_value': total_account_value,
-            'cash': available_cash,
+            'cash': current_cash,
             'equity_value': market_value_equity
         })
     
