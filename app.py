@@ -197,175 +197,38 @@ def safe_float(val):
         elif ',' in s: s = s.replace(',', '.')
         return float(s)
     except: return 0.0
-
-def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None):
-    """
-    Versión optimizada que acepta precios pre-descargados.
-    
-    Args:
-        df_closed: DataFrame con trades cerrados
-        initial_balance: Capital inicial
-        prices_dict: Dict {ticker: pd.Series} con precios ya descargados (opcional)
-    
-    Returns:
-        (daily_df, prices_dict) - DataFrame resultado + dict de precios descargados
-    """
-    if df_closed.empty:
-        return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return']), {}
-    
-    df = df_closed.copy()
-    df['entry_date'] = pd.to_datetime(df['entry_date']).dt.normalize()
-    df['exit_date'] = pd.to_datetime(df['exit_date']).dt.normalize()
-    
-    start_date = df['entry_date'].min().date()
-    end_date = df['exit_date'].max().date()
-    if pd.isna(end_date) or end_date < date.today():
-        end_date = date.today()
-    
-    tickers = list(df['symbol'].unique())
-    
-    # Si no hay precios cacheados, descargarlos
-    if prices_dict is None:
-        print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers...")
-        prices_dict = {}
-        
-        # Descarga en LOTES para ser más eficiente
-        BATCH_SIZE = 10
-        for i in range(0, len(tickers), BATCH_SIZE):
-            batch = tickers[i:i+BATCH_SIZE]
-            try:
-                batch_data = yf.download(
-                    batch,
-                    start=start_date,
-                    end=end_date + timedelta(days=1),
-                    auto_adjust=True,
-                    progress=False,
-                    threads=True  # Descarga paralela
-                )
-                
-                if not batch_data.empty:
-                    if len(batch) == 1:
-                        prices_dict[batch[0]] = batch_data['Close'] if 'Close' in batch_data.columns else batch_data.iloc[:, 0]
-                    else:
-                        for ticker in batch:
-                            try:
-                                if ticker in batch_data['Close'].columns:
-                                    prices_dict[ticker] = batch_data['Close'][ticker]
-                            except:
-                                pass
-                                
-                print(f"[PERFORMANCE] ✓ Descargados {i+len(batch)}/{len(tickers)} tickers")
-            except Exception as e:
-                print(f"[PERFORMANCE] ⚠ Error descargando batch {i}: {e}")
-                continue
-        
-        print(f"[PERFORMANCE] ✓ Descarga completa: {len(prices_dict)}/{len(tickers)} exitosos")
-    else:
-        print(f"[PERFORMANCE] ⚡ Usando precios cacheados ({len(prices_dict)} tickers)")
-    
-    # Construir DataFrame de precios normalizado
-    prices_data = {}
-    for ticker, series in prices_dict.items():
-        if series is not None and not series.empty:
-            series.index = pd.to_datetime(series.index).normalize()
-            prices_data[ticker] = series
-    
-    if not prices_data:
-        return pd.DataFrame(), prices_dict
-    
-    prices = pd.DataFrame(prices_data)
-    
-    # Calcular cash flows (ENTRADAS Y SALIDAS)
-    cash_flows = {}
-    
-    for _, trade in df.iterrows():
-        # SALIDA DE CASH: Cuando entras al trade (compras)
-        entry_d = trade['entry_date']
-        if pd.notna(entry_d):
-            entry_cost = trade['entry_price'] * trade['quantity']
-            cash_flows[entry_d] = cash_flows.get(entry_d, 0) - entry_cost  # Resta el costo
-        
-        # ENTRADA DE CASH: Cuando cierras el trade (vendes)
-        exit_d = trade['exit_date']
-        if pd.notna(exit_d):
-            exit_proceeds = trade['exit_price'] * trade['quantity']
-            cash_flows[exit_d] = cash_flows.get(exit_d, 0) + exit_proceeds  # Suma lo recaudado
-    
-    # Bucle diario
-    all_dates = prices.index
-    daily_values = []
-    current_cash = initial_balance  # Cash que va cambiando día a día
-    
-    for day in all_dates:
-        # Aplicar flujos de efectivo de este día
-        current_cash += cash_flows.get(day, 0)
-        
-        open_trades = df[
-            (df['entry_date'] <= day) &
-            ((df['exit_date'].isna()) | (df['exit_date'] > day))
-        ]
-        
-        market_value_equity = 0.0
-        
-        for _, trade in open_trades.iterrows():
-            ticker = trade['symbol']
-            qty = trade['quantity']
-            entry_price = trade['entry_price']
-            
-            if ticker in prices.columns and day in prices.index and pd.notna(prices.loc[day, ticker]):
-                current_price = prices.loc[day, ticker]
-                
-                if trade['side'] == 'LONG':
-                    market_value_equity += current_price * qty
-                else:
-                    # SHORT: Valor = Capital Inicial + PnL Latente
-                    trade_cost = entry_price * qty
-                    pnl_latente = (entry_price - current_price) * qty
-                    market_value_equity += (trade_cost + pnl_latente)
-            else:
-                # Si no hay precio, usar entry price
-                market_value_equity += entry_price * qty
-        
-        total_account_value = current_cash + market_value_equity
-        
-        daily_values.append({
-            'date': day,
-            'total_value': total_account_value,
-            'cash': current_cash,
-            'equity_value': market_value_equity
-        })
-    
-    result = pd.DataFrame(daily_values)
-    if not result.empty:
-        result['daily_return'] = result['total_value'].pct_change().fillna(0)
-        result['cumulative_return'] = (result['total_value'] / initial_balance) - 1
-    
-    return result, prices_dict
-
 def build_daily_portfolio(df_closed, initial_balance):
     """
     Calcula el valor diario del portfolio basado en trades históricos.
+    Descarga precios diarios vía yfinance para posiciones abiertas en cada día.
     
-    FIX: Usa pd.bdate_range para generar TODOS los días de mercado
-    entre el primer y último trade, eliminando saltos visuales por gaps.
+    Args:
+        df_closed: DataFrame con trades cerrados (columnas: symbol, entry_date, exit_date, 
+                   entry_price, exit_price, quantity, side)
+        initial_balance: Capital inicial del portfolio
+    
+    Returns:
+        DataFrame con: date, total_value, cumulative_return, daily_return
     """
     if df_closed.empty:
         return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return'])
     
+    # Preparar datos
     df = df_closed.copy()
     df['entry_date'] = pd.to_datetime(df['entry_date']).dt.normalize()
     df['exit_date'] = pd.to_datetime(df['exit_date']).dt.normalize()
     
+    # Rango de fechas
     start_date = df['entry_date'].min().date()
     end_date = df['exit_date'].max().date()
     if pd.isna(end_date) or end_date < date.today():
         end_date = date.today()
     
+    # Descargar precios históricos de todos los tickers
     tickers = list(df['symbol'].unique())
-    
     try:
         print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers: {tickers}")
-        print(f"[PERFORMANCE] Rango: {start_date} → {end_date}")
+        print(f"[PERFORMANCE] Rango de fechas: {start_date} → {end_date}")
         
         prices_raw = yf.download(
             tickers=tickers,
@@ -375,8 +238,7 @@ def build_daily_portfolio(df_closed, initial_balance):
             progress=False
         )
         
-        if prices_raw.empty:
-            raise Exception("Yahoo Finance devolvió datos vacíos")
+        print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
         
         # Formatear precios
         if len(tickers) == 1:
@@ -385,18 +247,15 @@ def build_daily_portfolio(df_closed, initial_balance):
             prices = prices_raw["Close"]
         
         prices.index = pd.to_datetime(prices.index).normalize()
-        
+        print(f"[PERFORMANCE] Precios formateados correctamente. {len(prices)} días descargados.")
+        # FIX: Rango continuo de business days para eliminar saltos
+        full_bdays = pd.bdate_range(start=start_date, end=end_date)
+        prices = prices.reindex(full_bdays).ffill().bfill()
     except Exception as e:
-        print(f"[PERFORMANCE] ❌ ERROR descargando precios: {e}")
-        raise Exception(f"No se pudieron descargar precios. Error: {str(e)}")
-    
-    # =====================================================================
-    # FIX CLAVE: Crear rango CONTINUO de días de mercado (business days)
-    # Esto evita que haya gaps entre periodos sin trades, eliminando
-    # el salto visual en el gráfico.
-    # =====================================================================
-    full_bdays = pd.bdate_range(start=start_date, end=end_date)
-    prices = prices.reindex(full_bdays).ffill().bfill()
+        print(f"[PERFORMANCE] ❌ ERROR descargando precios: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise Exception(f"No se pudieron descargar precios de Yahoo Finance. Verificá tu conexión a internet. Error: {str(e)}")
     
     # Calcular cash flows en cada fecha
     cash_flows = {}
@@ -410,13 +269,13 @@ def build_daily_portfolio(df_closed, initial_balance):
             revenue = trade['quantity'] * trade['exit_price']
             cash_flows[exit_d] = cash_flows.get(exit_d, 0) + revenue
     
-    # Calcular valor diario sobre el rango CONTINUO
+    # Calcular valor diario
     all_dates = prices.index
     daily_values = []
     cash = initial_balance
     
     for day in all_dates:
-        # Aplicar cash flows del día (snap a día de mercado más cercano)
+        # Actualizar cash con flujos del día
         cash += cash_flows.get(day, 0)
         
         # Posiciones abiertas en este día
@@ -425,7 +284,7 @@ def build_daily_portfolio(df_closed, initial_balance):
             ((df['exit_date'].isna()) | (df['exit_date'] > day))
         ]
         
-        # Valorar posiciones abiertas a mercado
+        # Valorar posiciones abiertas
         equity = 0.0
         for _, trade in open_trades.iterrows():
             ticker = trade['symbol']
@@ -434,10 +293,8 @@ def build_daily_portfolio(df_closed, initial_balance):
                 if trade['side'] == 'LONG':
                     equity += trade['quantity'] * price
                 else:  # SHORT
+                    # Para shorts: valor = capital inicial - pérdida/ganancia
                     equity += trade['quantity'] * (2 * trade['entry_price'] - price)
-            else:
-                # Fallback: usar entry_price
-                equity += trade['quantity'] * trade['entry_price']
         
         total = cash + equity
         daily_values.append({
@@ -447,8 +304,9 @@ def build_daily_portfolio(df_closed, initial_balance):
             'equity_value': equity
         })
     
+    # Crear DataFrame resultado
     result = pd.DataFrame(daily_values)
-    result['daily_return'] = result['total_value'].pct_change().fillna(0)
+    result['daily_return'] = result['total_value'].pct_change()
     result['cumulative_return'] = (result['total_value'] / initial_balance - 1)
     
     return result
@@ -842,74 +700,18 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         fig_evo_ratio.update_layout(title='EVOLUCION RATIO R/B', xaxis_title='Trades', yaxis_title='Ratio', hovermode='x unified', showlegend=False)
         fig_evo_ratio = style_fig(fig_evo_ratio)
 
-        # --- EDGE EVOLUTION ---
-        # Cálculo del Edge acumulativo: E(x) = (Win Rate × Ratio) - Loss Rate
-        # Convertimos win_rate y loss_rate de porcentaje a decimal
-        df_closed['cum_edge'] = (df_closed['cum_win_rate'] / 100) * df_closed['cum_ratio'] - (df_closed['cum_loss_rate'] / 100)
+        # --- EDGE TEÓRICO ---
+        x_vals = np.linspace(0.15, 0.85, 100)
+        y_be = (0.00 + 1 - x_vals) / x_vals
+        y_good = (0.25 + 1 - x_vals) / x_vals
+        y_exc = (0.50 + 1 - x_vals) / x_vals
         
         fig_edge = go.Figure()
-        
-        # Crear dos traces separados para el fill positivo y negativo
-        # 1. Área ROJA (cuando Edge < 0)
-        edge_negative = df_closed['cum_edge'].copy()
-        edge_negative[edge_negative > 0] = 0  # Solo valores negativos
-        
-        fig_edge.add_trace(go.Scatter(
-            x=df_closed['trade_num'], 
-            y=edge_negative, 
-            mode='lines',
-            line=dict(width=0),
-            fill='tozeroy',
-            fillcolor='rgba(246, 70, 93, 0.3)',
-            showlegend=False,
-            hoverinfo='skip'
-        ))
-        
-        # 2. Área VERDE (cuando Edge > 0)
-        edge_positive = df_closed['cum_edge'].copy()
-        edge_positive[edge_positive < 0] = 0  # Solo valores positivos
-        
-        fig_edge.add_trace(go.Scatter(
-            x=df_closed['trade_num'], 
-            y=edge_positive, 
-            mode='lines',
-            line=dict(width=0),
-            fill='tozeroy',
-            fillcolor='rgba(0, 176, 189, 0.3)',
-            showlegend=False,
-            hoverinfo='skip'
-        ))
-        
-        # 3. Línea principal del Edge
-        fig_edge.add_trace(go.Scatter(
-            x=df_closed['trade_num'], 
-            y=df_closed['cum_edge'], 
-            mode='lines', 
-            name='Edge', 
-            line=dict(color=TEXT_MAIN, width=3),
-            hovertemplate='Trade: %{x}<br>Edge: %{y:.3f}<extra></extra>'
-        ))
-        
-        # 4. Línea horizontal en y=0
-        fig_edge.add_hline(
-            y=0, 
-            line_color=COLOR_NEUTRAL, 
-            line_width=2,
-            line_dash='dash',
-            opacity=0.7,
-            annotation_text='Break Even',
-            annotation_position='right',
-            annotation_font_color=COLOR_NEUTRAL,
-            annotation_font_size=10
-        )
-        
-        fig_edge.update_layout(
-            title='EVOLUCIÓN DEL EDGE',
-            xaxis_title='Trades',
-            yaxis_title='Edge = (W × R/B) - L',
-            hovermode='x unified',
-            showlegend=False
-        )
+        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_be, mode='lines', name='Break Even (E=0)', line=dict(color=COLOR_NEG, width=2), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)'))
+        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_good, mode='lines', name='Bueno (E=0.25)', line=dict(color=COLOR_SPY, width=2), fill='tonexty', fillcolor='rgba(252, 213, 53, 0.2)'))
+        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_exc, mode='lines', name='Excelente (E=0.5)', line=dict(color=COLOR_POS, width=2), fill='tonexty', fillcolor='rgba(0, 176, 189, 0.2)'))
+        fig_edge.add_trace(go.Scatter(x=[win_rate], y=[ratio_money], mode='markers+text', name='Tu Sistema', marker=dict(color=TEXT_MAIN, size=10, line=dict(color=TEXT_MAIN, width=2)), text=['TU SISTEMA'], textposition='top right', textfont=dict(color=TEXT_MAIN, size=12)))
+        fig_edge.update_layout(title='EDGE TEORICO', xaxis_title='Win Rate (%)', yaxis_title='Ratio R/B', yaxis=dict(range=[0, max(7, ratio_r + 1)]), xaxis=dict(range=[15, 85]), hovermode='x unified', legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0)"))
         fig_edge = style_fig(fig_edge)
 
         # --- HISTOGRAMA PNL ---
@@ -1109,7 +911,6 @@ def layout_dashboard(username):
 app.layout = html.Div([
     dcc.Store(id='session-store', storage_type='session'),
     dcc.Store(id='selected-trade-store'),
-    dcc.Store(id='perf-prices-cache', storage_type='session'),
     dcc.Location(id='url', refresh=False),
     global_modals,
     dbc.Container([
@@ -1344,75 +1145,65 @@ def render_tab(tab, session):
         ])
     
     elif tab == 'tab-performance':
-        # Leemos el capital configurado en Analytics
-        current_cap = conf.get('initial_balance', 10000)
-        
         return dbc.Container([
-            # Controles (Sin input de capital, solo info y botón)
+            # Título
             dbc.Row([
-                dbc.Col([
-                    html.P(f"Base Capital: ${current_cap:,.0f}", 
-                           style={"color": COLOR_NEUTRAL, "fontSize": "0.9rem", "marginTop": "20px", "fontFamily": "Consolas, monospace"})
-                ], width=8),
-                
-                dbc.Col([
-                    dbc.Button(
-                        "🔄 RECALCULAR", 
-                        id="btn-calc-performance", 
-                        color="success", outline=True, size="sm",
-                        className="mt-3 float-end",
-                        style={"fontFamily": "Consolas", "fontWeight": "bold"}
-                    )
-                ], width=4)
+                dbc.Col(html.H4("📊 RETORNO ACUMULADO DEL PORTFOLIO", 
+                               style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "Consolas, monospace"}))
             ]),
             
-            html.Hr(style={"borderColor": BORDER_COLOR}),
-
-            # Selector de Periodo
+            # Controles
             dbc.Row([
                 dbc.Col([
-                    dbc.Label("SELECCIONAR PERIODO:", style={"color": COLOR_NEUTRAL, "fontSize": "0.75rem", "fontWeight": "bold", "fontFamily": "Consolas, monospace"}),
-                    dbc.RadioItems(
-                        id="perf-period-selector",
-                        options=[
-                            {"label": "HISTÓRICO COMPLETO", "value": "ALL"},
-                            {"label": "YEAR TO DATE (YTD)", "value": "YTD"},
-                            {"label": "AÑO ANTERIOR", "value": "LAST_YEAR"},
-                            {"label": "ÚLTIMOS 3 MESES", "value": "3M"},
-                        ],
-                        value="ALL",
-                        inline=True,
-                        className="btn-group-period",
-                        inputClassName="btn-check",
-                        labelClassName="btn btn-outline-secondary btn-sm",
-                        labelStyle={"marginRight": "10px", "fontFamily": "Consolas", "fontSize": "0.8rem"}
+                    html.Label("Capital Inicial ($):", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace"}),
+                    dcc.Input(
+                        id="perf-initial-balance",
+                        type="number",
+                        value=10000,
+                        style={**INPUT_STYLE, "width": "150px", "marginRight": "15px"}
                     )
-                ], width=12, className="text-center mb-4")
+                ], width=3),
+                
+                dbc.Col([
+                    html.Div(style={"height": "20px"}),  # Spacer
+                    dbc.Button(
+                        "CALCULAR", 
+                        id="btn-calc-performance", 
+                        color="secondary", 
+                        size="sm",
+                        style={"fontFamily": "Consolas, monospace", "fontWeight": "bold"}
+                    )
+                ], width=2),
+                
+                dbc.Col([
+                    html.Div(id="perf-status", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "25px", "fontFamily": "Consolas, monospace"})
+                ], width=7)
+            ], style={"marginTop": "15px", "marginBottom": "20px"}),
+            
+            # KPIs resumen
+            html.Div(id="perf-kpis-container", style={"marginBottom": "25px"}),
+            
+            # Gráfico principal
+            dbc.Row([
+                dbc.Col([
+                    dcc.Graph(
+                        id="fig-perf-cumulative",
+                        config={'displayModeBar': False},
+                        style={"height": "450px"}
+                    )
+                ], width=12)
             ]),
-
-            # LOADING WRAPPER para todo el contenido
-            dcc.Loading(
-                id="loading-performance", 
-                type="circle", 
-                color=COLOR_POS,
-                children=html.Div([
-                    # KPIs Container
-                    html.Div(id="perf-kpis-container", style={"marginBottom": "25px"}),
-                    
-                    # Status messages
-                    html.Div(id="perf-status", style={"marginBottom": "15px", "color": COLOR_NEUTRAL}),
-        
-                    # Gráfico 1: Retorno (Grande)
-                    dbc.Row([
-                        dbc.Col(dcc.Graph(id="fig-perf-cumulative", config={'displayModeBar': False}, style={"height": "450px"}), width=12)
-                    ]),
-                    
-                    # Gráfico 2: Drawdown (Chiquito)
-                    dbc.Row([
-                        dbc.Col(dcc.Graph(id="fig-perf-drawdown", config={'displayModeBar': False}, style={"height": "250px"}), width=12)
-                    ], style={"marginTop": "20px"})
-                ])
-            )
+            
+            # Gráfico secundario: composición (efectivo vs equity)
+            dbc.Row([
+                dbc.Col([
+                    dcc.Graph(
+                        id="fig-perf-composition",
+                        config={'displayModeBar': False},
+                        style={"height": "350px"}
+                    )
+                ], width=12)
+            ], style={"marginTop": "20px"})
             
         ], fluid=True, style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "padding": "20px"})
     
@@ -1792,265 +1583,224 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     df_open = db.get_open_trades(s['user'])
     if not df_open.empty: df_open = calculate_live_metrics(df_open)
     return "Actualizado.", format_df(df_open, s.get('config', {})), {'display': 'none'}, []
-
-# --- CALLBACK PERFORMANCE COMPLETO ---
 @app.callback(
     [
         Output("fig-perf-cumulative", "figure"),
-        Output("fig-perf-drawdown", "figure"),
+        Output("fig-perf-composition", "figure"),
         Output("perf-kpis-container", "children"),
-        Output("perf-status", "children"),
-        Output("perf-prices-cache", "data")
+        Output("perf-status", "children")
     ],
-    [
-        Input("btn-calc-performance", "n_clicks"), 
-        Input("perf-period-selector", "value"),
-    ],
-    [
-        State("tabs", "value"),        # ← CAMBIO: tabs pasa a State (no re-dispara)
-        State("session-store", "data"),
-        State("perf-prices-cache", "data")
-    ]
+    [Input("btn-calc-performance", "n_clicks")],          # ← SOLO el botón dispara
+    [State("perf-initial-balance", "value"),               # ← balance como State
+     State("session-store", "data")]                       # ← session como State
 )
-def update_performance(n_clicks, period_value, active_tab, session, cached_prices):
-    """
-    FIX 2: 
-    - tabs movido a State → ya no re-dispara al cambiar de pestaña
-    - Cache de daily_df serializado en perf-prices-cache
-    - Manejo robusto de errores con fallback a cache
-    """
+def update_performance(n_clicks, initial_balance, session):
+    """Calcula y muestra el retorno acumulado del portfolio."""
     
+    # Valores por defecto
     empty_fig = go.Figure()
     empty_fig.update_layout(
-        paper_bgcolor=CARD_BG, 
-        plot_bgcolor=CARD_BG, 
-        font_color=COLOR_NEUTRAL, 
-        xaxis=dict(visible=False), 
+        paper_bgcolor=CARD_BG,
+        plot_bgcolor=CARD_BG,
+        font_color=COLOR_NEUTRAL,
+        font_family="Consolas, monospace",
+        xaxis=dict(visible=False),
         yaxis=dict(visible=False)
     )
     
+    # Protección: solo ejecutar si se apretó el botón
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+    
     if not session:
-        return empty_fig, empty_fig, [], "", no_update
+        return empty_fig, empty_fig, [], ""
     
-    # Configuración
-    config = session.get('config', {})
-    try:
-        initial_balance = float(config.get('initial_balance', 10000))
-        if initial_balance <= 0: initial_balance = 10000
-    except: 
-        initial_balance = 10000.0
-
+    if not initial_balance or initial_balance <= 0:
+        return empty_fig, empty_fig, [], "⚠️ Ingresá un capital inicial válido"
+    
+    # Obtener trades cerrados
     df_closed = db.get_closed_trades(session['user'])
+    
     if df_closed.empty:
-        return empty_fig, empty_fig, [], html.Div("⚠️ Sin historial cerrado.", style={"color": COLOR_SPY}), no_update
+        return empty_fig, empty_fig, [], "⚠️ No hay trades cerrados para calcular"
     
-    # =====================================================================
-    # FIX: Intentar calcular, si falla usar cache previo
-    # =====================================================================
-    daily_df = None
-    cache_to_store = no_update
+    print(f"[PERFORMANCE] Calculando portfolio para {len(df_closed)} trades cerrados")
     
-    # Determinar si necesitamos recalcular o podemos usar cache
-    trigger = ctx.triggered_id
-    use_cache = (trigger == "perf-period-selector" and cached_prices is not None)
-    
-    if use_cache:
-        # Solo cambió el periodo → reusar datos cacheados sin re-descargar
-        try:
-            daily_df = pd.DataFrame(cached_prices)
-            daily_df['date'] = pd.to_datetime(daily_df['date'])
-            print("[PERFORMANCE] ⚡ Usando cache para cambio de periodo")
-        except Exception as e:
-            print(f"[PERFORMANCE] ⚠️ Cache corrupto, recalculando: {e}")
-            daily_df = None
-    
-    if daily_df is None:
-        # Necesitamos calcular (primer load o botón recalcular)
-        try:
-            daily_df = build_daily_portfolio(df_closed, initial_balance)
-            
-            if daily_df.empty:
-                return empty_fig, empty_fig, [], "⚠️ Error calculando portfolio.", no_update
-            
-            # Guardar en cache (serializable a JSON)
-            cache_to_store = daily_df.to_dict('records')
-            print(f"[PERFORMANCE] ✅ Portfolio calculado y cacheado ({len(daily_df)} días)")
-                
-        except Exception as e:
-            print(f"[PERFORMANCE] ❌ Error: {e}")
-            
-            # FALLBACK: intentar usar cache viejo
-            if cached_prices is not None:
-                try:
-                    daily_df = pd.DataFrame(cached_prices)
-                    daily_df['date'] = pd.to_datetime(daily_df['date'])
-                    print("[PERFORMANCE] ⚠️ Usando cache viejo por error de descarga")
-                except:
-                    return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", no_update
-            else:
-                return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", no_update
-    
-    # Benchmark SPY
+    # Calcular portfolio diario
     try:
-        start_date_all = daily_df['date'].min()
-        end_date_all = daily_df['date'].max()
-        spy_raw = yf.download("SPY", start=start_date_all, end=end_date_all + timedelta(days=3), progress=False, auto_adjust=True)
+        daily_df = build_daily_portfolio(df_closed, initial_balance)
         
-        if not spy_raw.empty:
-            if isinstance(spy_raw.columns, pd.MultiIndex):
-                try: 
-                    spy_series = spy_raw.xs('Close', level=0, axis=1)['SPY']
-                except: 
-                    spy_series = spy_raw.iloc[:, 0]
-            else:
-                col = 'Close' if 'Close' in spy_raw.columns else spy_raw.columns[0]
-                spy_series = spy_raw[col]
-            
-            # FIX: Alinear SPY al mismo índice continuo del portfolio
-            spy_series.index = pd.to_datetime(spy_series.index).normalize()
-            spy_aligned = spy_series.reindex(daily_df['date']).ffill().bfill()
-            daily_df['spy_price'] = spy_aligned.values
-        else: 
-            daily_df['spy_price'] = np.nan
+        if daily_df.empty:
+            return empty_fig, empty_fig, [], "⚠️ Error: No se pudieron obtener precios históricos"
+        
     except Exception as e:
-        print(f"[PERFORMANCE] ⚠️ Error descargando SPY: {e}")
-        daily_df['spy_price'] = np.nan
-
-    # Filtrado por Periodo
-    daily_df['date'] = pd.to_datetime(daily_df['date'])
-    today = pd.Timestamp.today()
-    start_filter = daily_df['date'].min()
-    end_filter = daily_df['date'].max()
-    period_label = "HISTÓRICO"
-
-    if period_value == 'YTD':
-        start_filter = datetime(today.year, 1, 1)
-        period_label = f"YTD ({today.year})"
-    elif period_value == 'LAST_YEAR':
-        start_filter = datetime(today.year - 1, 1, 1)
-        end_filter = datetime(today.year - 1, 12, 31)
-        period_label = f"AÑO {today.year - 1}"
-    elif period_value == '3M':
-        start_filter = today - timedelta(days=90)
-        period_label = "ÚLTIMOS 90 DÍAS"
-
-    mask = (daily_df['date'] >= pd.Timestamp(start_filter)) & (daily_df['date'] <= pd.Timestamp(end_filter))
-    period_df = daily_df.loc[mask].copy()
+        error_msg = str(e)
+        print(f"[PERFORMANCE] ❌ Error en callback: {error_msg}")
+        return empty_fig, empty_fig, [], f"⚠️ Error: {error_msg}"
     
-    if period_df.empty: 
-        return empty_fig, empty_fig, [], html.Div(f"⚠️ Sin datos para {period_label}", style={"color": "orange"}), cache_to_store
-
-    # Métricas y Normalización
-    period_start_value = period_df['total_value'].iloc[0]
-    period_df['norm_port'] = ((period_df['total_value'] / period_start_value) - 1) * 100
+    # ── KPIs ──
+    total_start = daily_df['total_value'].iloc[0]
+    total_end = daily_df['total_value'].iloc[-1]
+    total_return = (total_end / initial_balance - 1) * 100
+    total_pnl = total_end - initial_balance
     
-    if 'spy_price' in period_df.columns and not period_df['spy_price'].isnull().all():
-        spy_start = period_df['spy_price'].iloc[0]
-        if pd.notna(spy_start) and spy_start > 0:
-            period_df['norm_spy'] = ((period_df['spy_price'] / spy_start) - 1) * 100
-        else:
-            period_df['norm_spy'] = 0.0
-    else:
-        period_df['norm_spy'] = 0.0
-
-    # Drawdowns
-    dd_port_raw = (period_df['total_value'] / period_df['total_value'].cummax()) - 1
-    max_dd_port = dd_port_raw.min() * 100
+    best_day = daily_df.loc[daily_df['daily_return'].idxmax()]
+    worst_day = daily_df.loc[daily_df['daily_return'].idxmin()]
     
-    if not period_df['spy_price'].isnull().all():
-        dd_spy_raw = (period_df['spy_price'] / period_df['spy_price'].cummax()) - 1
-        max_dd_spy = dd_spy_raw.min() * 100
-    else:
-        dd_spy_raw = pd.Series(0, index=period_df.index)
-        max_dd_spy = 0.0
-
-    # Retornos Diarios
-    port_rets = period_df['total_value'].pct_change().fillna(0)
-    spy_rets = period_df['spy_price'].pct_change().fillna(0)
-    rfr_daily = 0.04 / 252
+    # Calcular drawdown máximo
+    cummax = daily_df['total_value'].cummax()
+    drawdown = (daily_df['total_value'] - cummax) / cummax
+    max_dd = drawdown.min() * 100
     
-    def calc_sharpe(rets):
-        if rets.std() == 0: return 0
-        return np.sqrt(252) * (rets.mean() - rfr_daily) / rets.std()
+    kpis_layout = dbc.Row([
+        dbc.Col(html.Div([
+            html.P(f"${initial_balance:,.0f}", style=KPI_VAL_STYLE),
+            html.P("CAPITAL INICIAL", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width=2),
         
-    def calc_sortino(rets):
-        downside = rets[rets < 0]
-        if len(downside) < 2: return 0
-        down_std = downside.std()
-        if down_std == 0: return 0
-        return np.sqrt(252) * (rets.mean() - rfr_daily) / down_std
+        dbc.Col(html.Div([
+            html.P(f"${total_end:,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
+            html.P("VALOR FINAL", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width=2),
+        
+        dbc.Col(html.Div([
+            html.P(f"{total_return:+.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_return >= 0 else COLOR_NEG}),
+            html.P("RETORNO TOTAL", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width=2),
+        
+        dbc.Col(html.Div([
+            html.P(f"${total_pnl:+,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
+            html.P("GANANCIA/PÉRDIDA", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width=2),
+        
+        dbc.Col(html.Div([
+            html.P(f"{max_dd:.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_NEG}),
+            html.P("DRAWDOWN MÁXIMO", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width=2),
+        
+        dbc.Col(html.Div([
+            html.P(f"{len(daily_df)}", style=KPI_VAL_STYLE),
+            html.P("DÍAS ACTIVOS", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width=2),
+    ])
     
-    sharpe_port = calc_sharpe(port_rets)
-    sharpe_spy = calc_sharpe(spy_rets)
-    sortino_port = calc_sortino(port_rets)
-    sortino_spy = calc_sortino(spy_rets)
+    # ── GRÁFICO 1: Retorno acumulado ──
+    fig_cumulative = go.Figure()
     
-    # Alpha y Beta
-    try:
-        cov = np.cov(port_rets, spy_rets)
-        beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 1.0
-        alpha = (port_rets.mean() - rfr_daily) - beta * (spy_rets.mean() - rfr_daily)
-        alpha *= 252 * 100
-    except:
-        beta, alpha = 1.0, 0.0
-
-    # Time Under Water
-    is_underwater = dd_port_raw < -0.0001
-    g = (is_underwater != is_underwater.shift()).cumsum()
-    underwater_streaks = is_underwater.groupby(g).sum()
-    streaks = underwater_streaks[underwater_streaks > 0]
-    max_tuw = streaks.max() if not streaks.empty else 0
-    avg_tuw = streaks.mean() if not streaks.empty else 0
-
-    # KPIs
-    def make_perf_card(title, main_val_str, sub_text=None, m_color=None):
-        v_style = KPI_VAL_STYLE.copy()
-        v_style['fontWeight'] = 'normal'
-        if m_color: v_style['color'] = m_color
-        content = [
-            html.P(main_val_str, style=v_style),
-            html.P(title, style=KPI_LBL_STYLE)
-        ]
-        if sub_text:
-            content.append(html.P(sub_text, style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "marginTop": "6px", "marginBottom": "0", "fontFamily": "Consolas, monospace"}))
-        return dbc.Col(html.Div(content, style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
-
-    kpis_layout = html.Div(dbc.Row([
-        make_perf_card("RETORNO", f"{period_df['norm_port'].iloc[-1]:+.2f}%", f"SPY: {period_df['norm_spy'].iloc[-1]:+.2f}%", COLOR_POS if period_df['norm_port'].iloc[-1] >= 0 else COLOR_NEG),
-        make_perf_card("MAX DRAWDOWN", f"{max_dd_port:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
-        make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
-        make_perf_card("SORTINO RATIO", f"{sortino_port:.2f}", f"SPY: {sortino_spy:.2f}", TEXT_MAIN),
-        make_perf_card("ALPHA (JENSEN)", f"α {alpha:+.2f}%", "Exceso vs Riesgo", COLOR_SPY),
-        make_perf_card("BETA", f"β {beta:.2f}", "Sensibilidad vs SPY", TEXT_MAIN),
-        make_perf_card("TIME UNDER WATER", f"{max_tuw:.0f} Max", f"{avg_tuw:.0f} Promedio (Días)", COLOR_NEG if max_tuw > 0 else TEXT_MAIN),
-        make_perf_card("DÍAS OPERADOS", f"{len(period_df)}", period_label, TEXT_MAIN)
-    ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
-
-    # Gráficos
-    fig_cum = go.Figure()
-    fig_cum.add_trace(go.Scatter(x=period_df['date'], y=period_df['norm_spy'], mode='lines', line=dict(color='#555555', width=1, dash='dash'), name='SPY'))
-    fig_cum.add_trace(go.Scatter(x=period_df['date'], y=period_df['norm_port'], mode='lines', line=dict(color=COLOR_POS, width=2), fill='tozeroy', fillcolor=f'rgba(0, 176, 189, 0.1)', name='Portfolio'))
-    fig_cum.add_hline(y=0, line_color=COLOR_NEUTRAL, opacity=0.3)
-    fig_cum.update_layout(
-        title={'text': f'RETORNO ACUMULADO - {period_label}', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.05, 'xanchor': 'left'},
-        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
-        hovermode='x unified', margin=dict(l=40, r=20, t=40, b=10),
-        yaxis=dict(showgrid=True, gridcolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(showgrid=False, gridcolor=BORDER_COLOR),
-        legend=dict(orientation="h", y=1.02, x=1, xanchor="right"), height=450
-    )
-
-    fig_dd = go.Figure()
-    fig_dd.add_trace(go.Scatter(x=period_df['date'], y=dd_port_raw*100, mode='lines', line=dict(color=COLOR_NEG, width=1), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)', name='Drawdown'))
-    fig_dd.update_layout(
-        title={'text': 'EVOLUCIÓN DEL DRAWDOWN', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.05, 'xanchor': 'left'},
-        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
-        hovermode='x unified', margin=dict(l=40, r=20, t=40, b=40),
-        yaxis=dict(showgrid=True, gridcolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(showgrid=False, gridcolor=BORDER_COLOR),
-        showlegend=False, height=250
+    ret_pct = daily_df['cumulative_return'] * 100
+    
+    fig_cumulative.add_trace(go.Scatter(
+        x=daily_df['date'],
+        y=ret_pct,
+        mode='lines',
+        line=dict(color=COLOR_POS, width=2.5),
+        fill='tozeroy',
+        fillcolor=f'rgba(0, 176, 189, 0.15)',
+        name='Retorno Acumulado',
+        hovertemplate='%{x|%Y-%m-%d}<br>Retorno: %{y:.2f}%<extra></extra>'
+    ))
+    
+    fig_cumulative.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color=COLOR_NEUTRAL,
+        line_width=1,
+        opacity=0.5
     )
     
-    return fig_cum, fig_dd, kpis_layout, "", cache_to_store
+    fig_cumulative.update_layout(
+        title={
+            'text': 'RETORNO ACUMULADO (%)',
+            'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'},
+            'x': 0.5,
+            'xanchor': 'center'
+        },
+        paper_bgcolor=CARD_BG,
+        plot_bgcolor=CARD_BG,
+        font_color=TEXT_MAIN,
+        font_family="Consolas, monospace",
+        hovermode='x unified',
+        margin=dict(l=60, r=30, t=60, b=50),
+        yaxis=dict(
+            title="Retorno (%)",
+            showgrid=True,
+            gridcolor=BORDER_COLOR,
+            zerolinecolor=BORDER_COLOR,
+            tickformat='.2f',
+            ticksuffix='%'
+        ),
+        xaxis=dict(
+            title="Fecha",
+            showgrid=False,
+            gridcolor=BORDER_COLOR
+        ),
+        showlegend=False
+    )
+    
+    # ── GRÁFICO 2: Composición (Efectivo vs Equity) ──
+    fig_composition = go.Figure()
+    
+    fig_composition.add_trace(go.Scatter(
+        x=daily_df['date'],
+        y=daily_df['cash'],
+        mode='lines',
+        name='Efectivo',
+        line=dict(color='#70AD47', width=0),
+        stackgroup='one',
+        fillcolor='rgba(112, 173, 71, 0.7)',
+        hovertemplate='Efectivo: $%{y:,.0f}<extra></extra>'
+    ))
+    
+    fig_composition.add_trace(go.Scatter(
+        x=daily_df['date'],
+        y=daily_df['equity_value'],
+        mode='lines',
+        name='Equity',
+        line=dict(color='#ED7D31', width=0),
+        stackgroup='one',
+        fillcolor='rgba(237, 125, 49, 0.7)',
+        hovertemplate='Equity: $%{y:,.0f}<extra></extra>'
+    ))
+    
+    fig_composition.update_layout(
+        title={
+            'text': 'COMPOSICIÓN DEL PORTFOLIO (EFECTIVO VS EQUITY)',
+            'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'},
+            'x': 0.5,
+            'xanchor': 'center'
+        },
+        paper_bgcolor=CARD_BG,
+        plot_bgcolor=CARD_BG,
+        font_color=TEXT_MAIN,
+        font_family="Consolas, monospace",
+        hovermode='x unified',
+        margin=dict(l=60, r=30, t=60, b=50),
+        yaxis=dict(
+            title="Valor ($)",
+            showgrid=True,
+            gridcolor=BORDER_COLOR,
+            tickformat='$,.0f'
+        ),
+        xaxis=dict(
+            title="Fecha",
+            showgrid=False
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1
+        )
+    )
+    
+    status = f"✓ Portfolio calculado: {len(daily_df)} días | Retorno: {total_return:+.2f}%"
+    
+    return fig_cumulative, fig_composition, kpis_layout, status
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# IMPORTANTE: Esto va DESPUÉS del callback, al final del archivo
+# ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
-
