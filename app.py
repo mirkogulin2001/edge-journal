@@ -345,35 +345,27 @@ def build_daily_portfolio_optimized(df_closed, initial_balance, prices_dict=None
 def build_daily_portfolio(df_closed, initial_balance):
     """
     Calcula el valor diario del portfolio basado en trades históricos.
-    Descarga precios diarios vía yfinance para posiciones abiertas en cada día.
     
-    Args:
-        df_closed: DataFrame con trades cerrados (columnas: symbol, entry_date, exit_date, 
-                   entry_price, exit_price, quantity, side)
-        initial_balance: Capital inicial del portfolio
-    
-    Returns:
-        DataFrame con: date, total_value, cumulative_return, daily_return
+    FIX: Usa pd.bdate_range para generar TODOS los días de mercado
+    entre el primer y último trade, eliminando saltos visuales por gaps.
     """
     if df_closed.empty:
         return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return'])
     
-    # Preparar datos
     df = df_closed.copy()
     df['entry_date'] = pd.to_datetime(df['entry_date']).dt.normalize()
     df['exit_date'] = pd.to_datetime(df['exit_date']).dt.normalize()
     
-    # Rango de fechas
     start_date = df['entry_date'].min().date()
     end_date = df['exit_date'].max().date()
     if pd.isna(end_date) or end_date < date.today():
         end_date = date.today()
     
-    # Descargar precios históricos de todos los tickers
     tickers = list(df['symbol'].unique())
+    
     try:
         print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers: {tickers}")
-        print(f"[PERFORMANCE] Rango de fechas: {start_date} → {end_date}")
+        print(f"[PERFORMANCE] Rango: {start_date} → {end_date}")
         
         prices_raw = yf.download(
             tickers=tickers,
@@ -383,7 +375,8 @@ def build_daily_portfolio(df_closed, initial_balance):
             progress=False
         )
         
-        print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
+        if prices_raw.empty:
+            raise Exception("Yahoo Finance devolvió datos vacíos")
         
         # Formatear precios
         if len(tickers) == 1:
@@ -392,13 +385,18 @@ def build_daily_portfolio(df_closed, initial_balance):
             prices = prices_raw["Close"]
         
         prices.index = pd.to_datetime(prices.index).normalize()
-        print(f"[PERFORMANCE] Precios formateados correctamente. {len(prices)} días descargados.")
         
     except Exception as e:
-        print(f"[PERFORMANCE] ❌ ERROR descargando precios: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise Exception(f"No se pudieron descargar precios de Yahoo Finance. Verificá tu conexión a internet. Error: {str(e)}")
+        print(f"[PERFORMANCE] ❌ ERROR descargando precios: {e}")
+        raise Exception(f"No se pudieron descargar precios. Error: {str(e)}")
+    
+    # =====================================================================
+    # FIX CLAVE: Crear rango CONTINUO de días de mercado (business days)
+    # Esto evita que haya gaps entre periodos sin trades, eliminando
+    # el salto visual en el gráfico.
+    # =====================================================================
+    full_bdays = pd.bdate_range(start=start_date, end=end_date)
+    prices = prices.reindex(full_bdays).ffill().bfill()
     
     # Calcular cash flows en cada fecha
     cash_flows = {}
@@ -412,13 +410,13 @@ def build_daily_portfolio(df_closed, initial_balance):
             revenue = trade['quantity'] * trade['exit_price']
             cash_flows[exit_d] = cash_flows.get(exit_d, 0) + revenue
     
-    # Calcular valor diario
+    # Calcular valor diario sobre el rango CONTINUO
     all_dates = prices.index
     daily_values = []
     cash = initial_balance
     
     for day in all_dates:
-        # Actualizar cash con flujos del día
+        # Aplicar cash flows del día (snap a día de mercado más cercano)
         cash += cash_flows.get(day, 0)
         
         # Posiciones abiertas en este día
@@ -427,7 +425,7 @@ def build_daily_portfolio(df_closed, initial_balance):
             ((df['exit_date'].isna()) | (df['exit_date'] > day))
         ]
         
-        # Valorar posiciones abiertas
+        # Valorar posiciones abiertas a mercado
         equity = 0.0
         for _, trade in open_trades.iterrows():
             ticker = trade['symbol']
@@ -436,8 +434,10 @@ def build_daily_portfolio(df_closed, initial_balance):
                 if trade['side'] == 'LONG':
                     equity += trade['quantity'] * price
                 else:  # SHORT
-                    # Para shorts: valor = capital inicial - pérdida/ganancia
                     equity += trade['quantity'] * (2 * trade['entry_price'] - price)
+            else:
+                # Fallback: usar entry_price
+                equity += trade['quantity'] * trade['entry_price']
         
         total = cash + equity
         daily_values.append({
@@ -447,9 +447,8 @@ def build_daily_portfolio(df_closed, initial_balance):
             'equity_value': equity
         })
     
-    # Crear DataFrame resultado
     result = pd.DataFrame(daily_values)
-    result['daily_return'] = result['total_value'].pct_change()
+    result['daily_return'] = result['total_value'].pct_change().fillna(0)
     result['cumulative_return'] = (result['total_value'] / initial_balance - 1)
     
     return result
@@ -1806,15 +1805,20 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     [
         Input("btn-calc-performance", "n_clicks"), 
         Input("perf-period-selector", "value"),
-        Input("tabs", "value")
     ],
     [
+        State("tabs", "value"),        # ← CAMBIO: tabs pasa a State (no re-dispara)
         State("session-store", "data"),
         State("perf-prices-cache", "data")
     ]
 )
 def update_performance(n_clicks, period_value, active_tab, session, cached_prices):
-    """Calcula portfolio con caché de precios para mejor performance."""
+    """
+    FIX 2: 
+    - tabs movido a State → ya no re-dispara al cambiar de pestaña
+    - Cache de daily_df serializado en perf-prices-cache
+    - Manejo robusto de errores con fallback a cache
+    """
     
     empty_fig = go.Figure()
     empty_fig.update_layout(
@@ -1825,13 +1829,10 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
         yaxis=dict(visible=False)
     )
     
-    if active_tab != 'tab-performance':
-        raise dash.exceptions.PreventUpdate
-    
     if not session:
         return empty_fig, empty_fig, [], "", no_update
     
-    # 1. Configuración - USAR CAPITAL DE ANALYTICS
+    # Configuración
     config = session.get('config', {})
     try:
         initial_balance = float(config.get('initial_balance', 10000))
@@ -1843,21 +1844,53 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
     if df_closed.empty:
         return empty_fig, empty_fig, [], html.Div("⚠️ Sin historial cerrado.", style={"color": COLOR_SPY}), no_update
     
-    # 2. Calcular Portfolio
-    try:
-        # Usar función simple (sin cache) - es más confiable
-        daily_df = build_daily_portfolio(df_closed, initial_balance)
-        
-        if daily_df.empty:
-            return empty_fig, empty_fig, [], "⚠️ Error calculando portfolio.", no_update
-            
-    except Exception as e:
-        print(f"[PERFORMANCE] ❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", no_update
+    # =====================================================================
+    # FIX: Intentar calcular, si falla usar cache previo
+    # =====================================================================
+    daily_df = None
+    cache_to_store = no_update
     
-    # 3. Benchmark SPY
+    # Determinar si necesitamos recalcular o podemos usar cache
+    trigger = ctx.triggered_id
+    use_cache = (trigger == "perf-period-selector" and cached_prices is not None)
+    
+    if use_cache:
+        # Solo cambió el periodo → reusar datos cacheados sin re-descargar
+        try:
+            daily_df = pd.DataFrame(cached_prices)
+            daily_df['date'] = pd.to_datetime(daily_df['date'])
+            print("[PERFORMANCE] ⚡ Usando cache para cambio de periodo")
+        except Exception as e:
+            print(f"[PERFORMANCE] ⚠️ Cache corrupto, recalculando: {e}")
+            daily_df = None
+    
+    if daily_df is None:
+        # Necesitamos calcular (primer load o botón recalcular)
+        try:
+            daily_df = build_daily_portfolio(df_closed, initial_balance)
+            
+            if daily_df.empty:
+                return empty_fig, empty_fig, [], "⚠️ Error calculando portfolio.", no_update
+            
+            # Guardar en cache (serializable a JSON)
+            cache_to_store = daily_df.to_dict('records')
+            print(f"[PERFORMANCE] ✅ Portfolio calculado y cacheado ({len(daily_df)} días)")
+                
+        except Exception as e:
+            print(f"[PERFORMANCE] ❌ Error: {e}")
+            
+            # FALLBACK: intentar usar cache viejo
+            if cached_prices is not None:
+                try:
+                    daily_df = pd.DataFrame(cached_prices)
+                    daily_df['date'] = pd.to_datetime(daily_df['date'])
+                    print("[PERFORMANCE] ⚠️ Usando cache viejo por error de descarga")
+                except:
+                    return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", no_update
+            else:
+                return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", no_update
+    
+    # Benchmark SPY
     try:
         start_date_all = daily_df['date'].min()
         end_date_all = daily_df['date'].max()
@@ -1872,14 +1905,18 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
             else:
                 col = 'Close' if 'Close' in spy_raw.columns else spy_raw.columns[0]
                 spy_series = spy_raw[col]
-            spy_aligned = spy_series.reindex(daily_df['date']).ffill()
+            
+            # FIX: Alinear SPY al mismo índice continuo del portfolio
+            spy_series.index = pd.to_datetime(spy_series.index).normalize()
+            spy_aligned = spy_series.reindex(daily_df['date']).ffill().bfill()
             daily_df['spy_price'] = spy_aligned.values
         else: 
             daily_df['spy_price'] = np.nan
-    except: 
+    except Exception as e:
+        print(f"[PERFORMANCE] ⚠️ Error descargando SPY: {e}")
         daily_df['spy_price'] = np.nan
 
-    # 4. Filtrado por Periodo
+    # Filtrado por Periodo
     daily_df['date'] = pd.to_datetime(daily_df['date'])
     today = pd.Timestamp.today()
     start_filter = daily_df['date'].min()
@@ -1903,13 +1940,16 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
     if period_df.empty: 
         return empty_fig, empty_fig, [], html.Div(f"⚠️ Sin datos para {period_label}", style={"color": "orange"}), cache_to_store
 
-    # 5. Métricas y Normalización
+    # Métricas y Normalización
     period_start_value = period_df['total_value'].iloc[0]
     period_df['norm_port'] = ((period_df['total_value'] / period_start_value) - 1) * 100
     
     if 'spy_price' in period_df.columns and not period_df['spy_price'].isnull().all():
         spy_start = period_df['spy_price'].iloc[0]
-        period_df['norm_spy'] = ((period_df['spy_price'] / spy_start) - 1) * 100
+        if pd.notna(spy_start) and spy_start > 0:
+            period_df['norm_spy'] = ((period_df['spy_price'] / spy_start) - 1) * 100
+        else:
+            period_df['norm_spy'] = 0.0
     else:
         period_df['norm_spy'] = 0.0
 
@@ -1917,20 +1957,22 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
     dd_port_raw = (period_df['total_value'] / period_df['total_value'].cummax()) - 1
     max_dd_port = dd_port_raw.min() * 100
     
-    dd_spy_raw = (period_df['spy_price'] / period_df['spy_price'].cummax()) - 1
-    max_dd_spy = dd_spy_raw.min() * 100
+    if not period_df['spy_price'].isnull().all():
+        dd_spy_raw = (period_df['spy_price'] / period_df['spy_price'].cummax()) - 1
+        max_dd_spy = dd_spy_raw.min() * 100
+    else:
+        dd_spy_raw = pd.Series(0, index=period_df.index)
+        max_dd_spy = 0.0
 
     # Retornos Diarios
     port_rets = period_df['total_value'].pct_change().fillna(0)
     spy_rets = period_df['spy_price'].pct_change().fillna(0)
     rfr_daily = 0.04 / 252
     
-    # Sharpe
     def calc_sharpe(rets):
         if rets.std() == 0: return 0
         return np.sqrt(252) * (rets.mean() - rfr_daily) / rets.std()
         
-    # Sortino
     def calc_sortino(rets):
         downside = rets[rets < 0]
         if len(downside) < 2: return 0
@@ -1946,7 +1988,7 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
     # Alpha y Beta
     try:
         cov = np.cov(port_rets, spy_rets)
-        beta = cov[0, 1] / cov[1, 1]
+        beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 1.0
         alpha = (port_rets.mean() - rfr_daily) - beta * (spy_rets.mean() - rfr_daily)
         alpha *= 252 * 100
     except:
@@ -1960,20 +2002,17 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
     max_tuw = streaks.max() if not streaks.empty else 0
     avg_tuw = streaks.mean() if not streaks.empty else 0
 
-    # 6. KPIs
+    # KPIs
     def make_perf_card(title, main_val_str, sub_text=None, m_color=None):
         v_style = KPI_VAL_STYLE.copy()
         v_style['fontWeight'] = 'normal'
         if m_color: v_style['color'] = m_color
-        
         content = [
             html.P(main_val_str, style=v_style),
             html.P(title, style=KPI_LBL_STYLE)
         ]
-        
         if sub_text:
             content.append(html.P(sub_text, style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "marginTop": "6px", "marginBottom": "0", "fontFamily": "Consolas, monospace"}))
-            
         return dbc.Col(html.Div(content, style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
 
     kpis_layout = html.Div(dbc.Row([
@@ -1987,7 +2026,7 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
         make_perf_card("DÍAS OPERADOS", f"{len(period_df)}", period_label, TEXT_MAIN)
     ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
 
-    # 7. Gráficos
+    # Gráficos
     fig_cum = go.Figure()
     fig_cum.add_trace(go.Scatter(x=period_df['date'], y=period_df['norm_spy'], mode='lines', line=dict(color='#555555', width=1, dash='dash'), name='SPY'))
     fig_cum.add_trace(go.Scatter(x=period_df['date'], y=period_df['norm_port'], mode='lines', line=dict(color=COLOR_POS, width=2), fill='tozeroy', fillcolor=f'rgba(0, 176, 189, 0.1)', name='Portfolio'))
@@ -2010,7 +2049,8 @@ def update_performance(n_clicks, period_value, active_tab, session, cached_price
         showlegend=False, height=250
     )
     
-    return fig_cum, fig_dd, kpis_layout, "", no_update
+    return fig_cum, fig_dd, kpis_layout, "", cache_to_store
 
 if __name__ == '__main__':
     app.run(debug=True)
+
