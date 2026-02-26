@@ -1595,6 +1595,11 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     df_open = db.get_open_trades(s['user'])
     if not df_open.empty: df_open = calculate_live_metrics(df_open)
     return "Actualizado.", format_df(df_open, s.get('config', {})), {'display': 'none'}, []
+# ══════════════════════════════════════════════════════════
+# REEMPLAZÁ tu callback update_performance por este
+# (es el mismo pero con prints de diagnóstico al inicio)
+# ══════════════════════════════════════════════════════════
+
 @app.callback(
     [
         Output("fig-perf-cumulative", "figure"),
@@ -1602,12 +1607,19 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
         Output("perf-kpis-container", "children"),
         Output("perf-status", "children")
     ],
-    [Input("btn-calc-performance", "n_clicks")],          # ← SOLO el botón dispara
-    [State("perf-initial-balance", "value"),               # ← balance como State
-     State("session-store", "data")]                       # ← session como State
+    [Input("btn-calc-performance", "n_clicks")],
+    [State("perf-initial-balance", "value"),
+     State("session-store", "data")],
+    prevent_initial_call=True   # ← AGREGÁ ESTO en lugar del raise PreventUpdate
 )
 def update_performance(n_clicks, initial_balance, session):
     """Calcula y muestra el retorno acumulado del portfolio."""
+    
+    print("=" * 60)
+    print(f"[PERF] 🔥 CALLBACK DISPARADO! n_clicks={n_clicks}")
+    print(f"[PERF] initial_balance={initial_balance}")
+    print(f"[PERF] session={session is not None}")
+    print("=" * 60)
     
     # Valores por defecto
     empty_fig = go.Figure()
@@ -1620,46 +1632,38 @@ def update_performance(n_clicks, initial_balance, session):
         yaxis=dict(visible=False)
     )
     
-    # Protección: solo ejecutar si se apretó el botón
-    if not n_clicks:
-        raise dash.exceptions.PreventUpdate
-    
     if not session:
-        return empty_fig, empty_fig, [], ""
+        print("[PERF] ❌ No hay session")
+        return empty_fig, empty_fig, [], "⚠️ Sin sesión"
     
     if not initial_balance or initial_balance <= 0:
+        print("[PERF] ❌ Balance inválido")
         return empty_fig, empty_fig, [], "⚠️ Ingresá un capital inicial válido"
     
-    # Obtener trades cerrados
     df_closed = db.get_closed_trades(session['user'])
+    print(f"[PERF] Trades cerrados: {len(df_closed)}")
     
     if df_closed.empty:
         return empty_fig, empty_fig, [], "⚠️ No hay trades cerrados para calcular"
     
-    print(f"[PERFORMANCE] Calculando portfolio para {len(df_closed)} trades cerrados")
-    
-    # Calcular portfolio diario
     try:
         daily_df = build_daily_portfolio(df_closed, initial_balance)
+        print(f"[PERF] ✅ Portfolio calculado: {len(daily_df)} días")
         
         if daily_df.empty:
-            return empty_fig, empty_fig, [], "⚠️ Error: No se pudieron obtener precios históricos"
+            return empty_fig, empty_fig, [], "⚠️ Error: Portfolio vacío"
         
     except Exception as e:
-        error_msg = str(e)
-        print(f"[PERFORMANCE] ❌ Error en callback: {error_msg}")
-        return empty_fig, empty_fig, [], f"⚠️ Error: {error_msg}"
+        print(f"[PERF] ❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}"
     
-    # ── KPIs ──
-    total_start = daily_df['total_value'].iloc[0]
+    # KPIs
     total_end = daily_df['total_value'].iloc[-1]
     total_return = (total_end / initial_balance - 1) * 100
     total_pnl = total_end - initial_balance
     
-    best_day = daily_df.loc[daily_df['daily_return'].idxmax()]
-    worst_day = daily_df.loc[daily_df['daily_return'].idxmin()]
-    
-    # Calcular drawdown máximo
     cummax = daily_df['total_value'].cummax()
     drawdown = (daily_df['total_value'] - cummax) / cummax
     max_dd = drawdown.min() * 100
@@ -1669,151 +1673,75 @@ def update_performance(n_clicks, initial_balance, session):
             html.P(f"${initial_balance:,.0f}", style=KPI_VAL_STYLE),
             html.P("CAPITAL INICIAL", style=KPI_LBL_STYLE)
         ], style=KPI_CARD_STYLE), width=2),
-        
         dbc.Col(html.Div([
             html.P(f"${total_end:,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
             html.P("VALOR FINAL", style=KPI_LBL_STYLE)
         ], style=KPI_CARD_STYLE), width=2),
-        
         dbc.Col(html.Div([
             html.P(f"{total_return:+.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_return >= 0 else COLOR_NEG}),
             html.P("RETORNO TOTAL", style=KPI_LBL_STYLE)
         ], style=KPI_CARD_STYLE), width=2),
-        
         dbc.Col(html.Div([
             html.P(f"${total_pnl:+,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
             html.P("GANANCIA/PÉRDIDA", style=KPI_LBL_STYLE)
         ], style=KPI_CARD_STYLE), width=2),
-        
         dbc.Col(html.Div([
             html.P(f"{max_dd:.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_NEG}),
             html.P("DRAWDOWN MÁXIMO", style=KPI_LBL_STYLE)
         ], style=KPI_CARD_STYLE), width=2),
-        
         dbc.Col(html.Div([
             html.P(f"{len(daily_df)}", style=KPI_VAL_STYLE),
             html.P("DÍAS ACTIVOS", style=KPI_LBL_STYLE)
         ], style=KPI_CARD_STYLE), width=2),
     ])
     
-    # ── GRÁFICO 1: Retorno acumulado ──
+    # Gráfico retorno acumulado
     fig_cumulative = go.Figure()
-    
     ret_pct = daily_df['cumulative_return'] * 100
-    
     fig_cumulative.add_trace(go.Scatter(
-        x=daily_df['date'],
-        y=ret_pct,
-        mode='lines',
+        x=daily_df['date'], y=ret_pct, mode='lines',
         line=dict(color=COLOR_POS, width=2.5),
-        fill='tozeroy',
-        fillcolor=f'rgba(0, 176, 189, 0.15)',
+        fill='tozeroy', fillcolor='rgba(0, 176, 189, 0.15)',
         name='Retorno Acumulado',
         hovertemplate='%{x|%Y-%m-%d}<br>Retorno: %{y:.2f}%<extra></extra>'
     ))
-    
-    fig_cumulative.add_hline(
-        y=0,
-        line_dash="dash",
-        line_color=COLOR_NEUTRAL,
-        line_width=1,
-        opacity=0.5
-    )
-    
+    fig_cumulative.add_hline(y=0, line_dash="dash", line_color=COLOR_NEUTRAL, line_width=1, opacity=0.5)
     fig_cumulative.update_layout(
-        title={
-            'text': 'RETORNO ACUMULADO (%)',
-            'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'},
-            'x': 0.5,
-            'xanchor': 'center'
-        },
-        paper_bgcolor=CARD_BG,
-        plot_bgcolor=CARD_BG,
-        font_color=TEXT_MAIN,
-        font_family="Consolas, monospace",
-        hovermode='x unified',
-        margin=dict(l=60, r=30, t=60, b=50),
-        yaxis=dict(
-            title="Retorno (%)",
-            showgrid=True,
-            gridcolor=BORDER_COLOR,
-            zerolinecolor=BORDER_COLOR,
-            tickformat='.2f',
-            ticksuffix='%'
-        ),
-        xaxis=dict(
-            title="Fecha",
-            showgrid=False,
-            gridcolor=BORDER_COLOR
-        ),
-        showlegend=False
+        title={'text': 'RETORNO ACUMULADO (%)', 'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.5, 'xanchor': 'center'},
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
+        hovermode='x unified', margin=dict(l=60, r=30, t=60, b=50),
+        yaxis=dict(title="Retorno (%)", showgrid=True, gridcolor=BORDER_COLOR, ticksuffix='%'),
+        xaxis=dict(title="Fecha", showgrid=False), showlegend=False
     )
     
-    # ── GRÁFICO 2: Composición (Efectivo vs Equity) ──
+    # Gráfico composición
     fig_composition = go.Figure()
-    
     fig_composition.add_trace(go.Scatter(
-        x=daily_df['date'],
-        y=daily_df['cash'],
-        mode='lines',
-        name='Efectivo',
-        line=dict(color='#70AD47', width=0),
-        stackgroup='one',
-        fillcolor='rgba(112, 173, 71, 0.7)',
-        hovertemplate='Efectivo: $%{y:,.0f}<extra></extra>'
+        x=daily_df['date'], y=daily_df['cash'], mode='lines', name='Efectivo',
+        line=dict(color='#70AD47', width=0), stackgroup='one', fillcolor='rgba(112, 173, 71, 0.7)'
     ))
-    
     fig_composition.add_trace(go.Scatter(
-        x=daily_df['date'],
-        y=daily_df['equity_value'],
-        mode='lines',
-        name='Equity',
-        line=dict(color='#ED7D31', width=0),
-        stackgroup='one',
-        fillcolor='rgba(237, 125, 49, 0.7)',
-        hovertemplate='Equity: $%{y:,.0f}<extra></extra>'
+        x=daily_df['date'], y=daily_df['equity_value'], mode='lines', name='Equity',
+        line=dict(color='#ED7D31', width=0), stackgroup='one', fillcolor='rgba(237, 125, 49, 0.7)'
     ))
-    
     fig_composition.update_layout(
-        title={
-            'text': 'COMPOSICIÓN DEL PORTFOLIO (EFECTIVO VS EQUITY)',
-            'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'},
-            'x': 0.5,
-            'xanchor': 'center'
-        },
-        paper_bgcolor=CARD_BG,
-        plot_bgcolor=CARD_BG,
-        font_color=TEXT_MAIN,
-        font_family="Consolas, monospace",
-        hovermode='x unified',
-        margin=dict(l=60, r=30, t=60, b=50),
-        yaxis=dict(
-            title="Valor ($)",
-            showgrid=True,
-            gridcolor=BORDER_COLOR,
-            tickformat='$,.0f'
-        ),
-        xaxis=dict(
-            title="Fecha",
-            showgrid=False
-        ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
-        )
+        title={'text': 'COMPOSICIÓN (EFECTIVO VS EQUITY)', 'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.5, 'xanchor': 'center'},
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
+        hovermode='x unified', margin=dict(l=60, r=30, t=60, b=50),
+        yaxis=dict(title="Valor ($)", showgrid=True, gridcolor=BORDER_COLOR, tickformat='$,.0f'),
+        xaxis=dict(title="Fecha", showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     
     status = f"✓ Portfolio calculado: {len(daily_df)} días | Retorno: {total_return:+.2f}%"
+    print(f"[PERF] ✅ ÉXITO: {status}")
     
     return fig_cumulative, fig_composition, kpis_layout, status
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # IMPORTANTE: Esto va DESPUÉS del callback, al final del archivo
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
+
 
