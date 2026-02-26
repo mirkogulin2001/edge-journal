@@ -926,8 +926,20 @@ app.layout = html.Div([
     ], fluid=True, style={"maxWidth": "1600px"})
 ], style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "fontFamily": "Consolas, monospace", "color": TEXT_MAIN, "paddingBottom": "50px"})
 
-app.validation_layout = html.Div([app.layout, layout_login(), layout_dashboard("User"), global_modals, get_management_panel()])
-
+app.validation_layout = html.Div([
+    app.layout, 
+    layout_login(), 
+    layout_dashboard("User"), 
+    global_modals, 
+    get_management_panel(),
+    # Componentes de Performance que Dash necesita conocer al inicio
+    dcc.Graph(id="fig-perf-cumulative"),
+    dcc.Graph(id="fig-perf-composition"),
+    html.Div(id="perf-kpis-container"),
+    html.Div(id="perf-status"),
+    dcc.Input(id="perf-initial-balance"),
+    html.Button(id="btn-calc-performance"),
+])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
 def render_page(s): return layout_dashboard(s['user']) if s and 'user' in s else layout_login()
@@ -1804,3 +1816,4 @@ def update_performance(n_clicks, initial_balance, session):
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
+
