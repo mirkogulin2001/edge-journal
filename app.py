@@ -18,6 +18,9 @@ from datetime import datetime as dt_datetime
 # --- CACHE PARA PRECIOS LIVE (30 segundos) ---
 _price_cache = {}
 _cache_timestamp = {}
+_perf_cache = {}
+_perf_cache_time = {}
+PERF_CACHE_TTL = 300
 
 def get_cached_live_prices(tickers):
     """Obtiene precios con cache de 30 segundos para evitar descargas repetitivas"""
@@ -1610,10 +1613,10 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     [Input("btn-calc-performance", "n_clicks")],
     [State("perf-initial-balance", "value"),
      State("session-store", "data")],
-    prevent_initial_call=True   # ← AGREGÁ ESTO en lugar del raise PreventUpdate
+    prevent_initial_call=True
 )
 def update_performance(n_clicks, initial_balance, session):
-    """Calcula y muestra el retorno acumulado del portfolio."""
+    """Calcula y muestra el retorno acumulado del portfolio (con cache)."""
     
     print("=" * 60)
     print(f"[PERF] 🔥 CALLBACK DISPARADO! n_clicks={n_clicks}")
@@ -1621,26 +1624,35 @@ def update_performance(n_clicks, initial_balance, session):
     print(f"[PERF] session={session is not None}")
     print("=" * 60)
     
-    # Valores por defecto
     empty_fig = go.Figure()
     empty_fig.update_layout(
-        paper_bgcolor=CARD_BG,
-        plot_bgcolor=CARD_BG,
-        font_color=COLOR_NEUTRAL,
-        font_family="Consolas, monospace",
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False)
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG,
+        font_color=COLOR_NEUTRAL, font_family="Consolas, monospace",
+        xaxis=dict(visible=False), yaxis=dict(visible=False)
     )
     
     if not session:
-        print("[PERF] ❌ No hay session")
         return empty_fig, empty_fig, [], "⚠️ Sin sesión"
     
     if not initial_balance or initial_balance <= 0:
-        print("[PERF] ❌ Balance inválido")
         return empty_fig, empty_fig, [], "⚠️ Ingresá un capital inicial válido"
     
-    df_closed = db.get_closed_trades(session['user'])
+    user = session['user']
+    
+    # ── CACHE CHECK ──
+    cache_key = f"{user}_{initial_balance}"
+    now = dt_datetime.now()
+    
+    if cache_key in _perf_cache:
+        elapsed = (now - _perf_cache_time[cache_key]).total_seconds()
+        if elapsed < PERF_CACHE_TTL:
+            print(f"[PERF] ⚡ CACHE HIT ({elapsed:.0f}s ago)")
+            return _perf_cache[cache_key]
+        else:
+            print(f"[PERF] 🔄 Cache expirado ({elapsed:.0f}s)")
+    
+    # ── CÁLCULO NORMAL ──
+    df_closed = db.get_closed_trades(user)
     print(f"[PERF] Trades cerrados: {len(df_closed)}")
     
     if df_closed.empty:
@@ -1659,7 +1671,7 @@ def update_performance(n_clicks, initial_balance, session):
         traceback.print_exc()
         return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}"
     
-    # KPIs
+    # ── KPIs ──
     total_end = daily_df['total_value'].iloc[-1]
     total_return = (total_end / initial_balance - 1) * 100
     total_pnl = total_end - initial_balance
@@ -1695,7 +1707,7 @@ def update_performance(n_clicks, initial_balance, session):
         ], style=KPI_CARD_STYLE), width=2),
     ])
     
-    # Gráfico retorno acumulado
+    # ── GRÁFICO 1: Retorno acumulado ──
     fig_cumulative = go.Figure()
     ret_pct = daily_df['cumulative_return'] * 100
     fig_cumulative.add_trace(go.Scatter(
@@ -1714,7 +1726,7 @@ def update_performance(n_clicks, initial_balance, session):
         xaxis=dict(title="Fecha", showgrid=False), showlegend=False
     )
     
-    # Gráfico composición
+    # ── GRÁFICO 2: Composición ──
     fig_composition = go.Figure()
     fig_composition.add_trace(go.Scatter(
         x=daily_df['date'], y=daily_df['cash'], mode='lines', name='Efectivo',
@@ -1736,12 +1748,19 @@ def update_performance(n_clicks, initial_balance, session):
     status = f"✓ Portfolio calculado: {len(daily_df)} días | Retorno: {total_return:+.2f}%"
     print(f"[PERF] ✅ ÉXITO: {status}")
     
-    return fig_cumulative, fig_composition, kpis_layout, status
+    # ── GUARDAR EN CACHE ──
+    result = (fig_cumulative, fig_composition, kpis_layout, status)
+    _perf_cache[cache_key] = result
+    _perf_cache_time[cache_key] = now
+    print(f"[PERF] 💾 Resultado cacheado para {cache_key}")
+    
+    return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # IMPORTANTE: Esto va DESPUÉS del callback, al final del archivo
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
