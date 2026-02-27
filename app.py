@@ -935,13 +935,14 @@ app.validation_layout = html.Div([
     layout_dashboard("User"), 
     global_modals, 
     get_management_panel(),
-    # Componentes de Performance que Dash necesita conocer al inicio
+    # Componentes de Performance
     dcc.Graph(id="fig-perf-cumulative"),
-    dcc.Graph(id="fig-perf-composition"),
+    dcc.Graph(id="fig-perf-drawdown"),
     html.Div(id="perf-kpis-container"),
     html.Div(id="perf-status"),
-    dcc.Input(id="perf-initial-balance"),
-    html.Button(id="btn-calc-performance"),
+    html.Button(id="btn-perf-ytd"),
+    html.Button(id="btn-perf-yoy"),
+    html.Button(id="btn-perf-all"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1160,6 +1161,9 @@ def render_tab(tab, session):
         ])
     
     elif tab == 'tab-performance':
+        # Leer capital inicial de la config (mismo que Analytics)
+        saved_bal = conf.get('initial_balance', 10000)
+        
         return dbc.Container([
             # Título
             dbc.Row([
@@ -1167,58 +1171,63 @@ def render_tab(tab, session):
                                style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "Consolas, monospace"}))
             ]),
             
-            # Controles
+            # Controles: 3 botones de periodo + indicador de capital
             dbc.Row([
                 dbc.Col([
-                    html.Label("Capital Inicial ($):", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace"}),
-                    dcc.Input(
-                        id="perf-initial-balance",
-                        type="number",
-                        value=10000,
-                        style={**INPUT_STYLE, "width": "150px", "marginRight": "15px"}
-                    )
+                    html.Label("Período:", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "marginBottom": "5px", "display": "block"}),
+                    dbc.ButtonGroup([
+                        dbc.Button("YTD", id="btn-perf-ytd", color="dark", outline=True, size="sm",
+                                   style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),
+                        dbc.Button("YoY", id="btn-perf-yoy", color="dark", outline=True, size="sm",
+                                   style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),
+                        dbc.Button("ALL DATA", id="btn-perf-all", color="dark", outline=True, size="sm",
+                                   style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),
+                    ], size="sm")
+                ], width=4),
+                
+                dbc.Col([
+                    html.Div([
+                        html.Span("Capital Inicial: ", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace"}),
+                        html.Span(f"${saved_bal:,.0f}", style={"color": TEXT_MAIN, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "fontWeight": "bold"}),
+                        html.Span(" (config Analytics)", style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "fontFamily": "Consolas, monospace", "marginLeft": "5px"}),
+                    ], style={"paddingTop": "25px"})
                 ], width=3),
                 
                 dbc.Col([
-                    html.Div(style={"height": "20px"}),  # Spacer
-                    dbc.Button(
-                        "CALCULAR", 
-                        id="btn-calc-performance", 
-                        color="secondary", 
-                        size="sm",
-                        style={"fontFamily": "Consolas, monospace", "fontWeight": "bold"}
-                    )
-                ], width=2),
-                
-                dbc.Col([
                     html.Div(id="perf-status", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "25px", "fontFamily": "Consolas, monospace"})
-                ], width=7)
+                ], width=5)
             ], style={"marginTop": "15px", "marginBottom": "20px"}),
             
             # KPIs resumen
             html.Div(id="perf-kpis-container", style={"marginBottom": "25px"}),
             
-            # Gráfico principal
+            # Gráfico principal: Retorno Acumulado
             dbc.Row([
                 dbc.Col([
                     dcc.Graph(
                         id="fig-perf-cumulative",
                         config={'displayModeBar': False},
-                        style={"height": "450px"}
+                        style={"height": "450px"},
+                        figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
+                                           "xaxis": {"visible": False}, "yaxis": {"visible": False},
+                                           "font": {"color": COLOR_NEUTRAL}}}
                     )
                 ], width=12)
             ]),
             
-            # Gráfico secundario: composición (efectivo vs equity)
+            # Gráfico secundario: Drawdown %
             dbc.Row([
                 dbc.Col([
                     dcc.Graph(
-                        id="fig-perf-composition",
+                        id="fig-perf-drawdown",
                         config={'displayModeBar': False},
-                        style={"height": "350px"}
+                        style={"height": "250px"},
+                        figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
+                                           "xaxis": {"visible": False}, "yaxis": {"visible": False},
+                                           "font": {"color": COLOR_NEUTRAL}}}
                     )
                 ], width=12)
-            ], style={"marginTop": "20px"})
+            ], style={"marginTop": "10px"})
             
         ], fluid=True, style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "padding": "20px"})
     
@@ -1606,21 +1615,32 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
 @app.callback(
     [
         Output("fig-perf-cumulative", "figure"),
-        Output("fig-perf-composition", "figure"),
+        Output("fig-perf-drawdown", "figure"),
         Output("perf-kpis-container", "children"),
         Output("perf-status", "children")
     ],
-    [Input("btn-calc-performance", "n_clicks")],
-    [State("perf-initial-balance", "value"),
-     State("session-store", "data")],
+    [
+        Input("btn-perf-ytd", "n_clicks"),
+        Input("btn-perf-yoy", "n_clicks"),
+        Input("btn-perf-all", "n_clicks"),
+    ],
+    [State("session-store", "data")],
     prevent_initial_call=True
 )
-def update_performance(n_clicks, initial_balance, session):
-    """Calcula y muestra el retorno acumulado del portfolio (con cache)."""
+def update_performance(n_ytd, n_yoy, n_all, session):
+    """Calcula y muestra el retorno acumulado del portfolio por periodo."""
+    
+    # Determinar qué botón se apretó
+    triggered = ctx.triggered_id
+    if triggered == "btn-perf-ytd":
+        period = "YTD"
+    elif triggered == "btn-perf-yoy":
+        period = "YOY"
+    else:
+        period = "ALL"
     
     print("=" * 60)
-    print(f"[PERF] 🔥 CALLBACK DISPARADO! n_clicks={n_clicks}")
-    print(f"[PERF] initial_balance={initial_balance}")
+    print(f"[PERF] 🔥 CALLBACK DISPARADO! Periodo={period}")
     print(f"[PERF] session={session is not None}")
     print("=" * 60)
     
@@ -1634,13 +1654,22 @@ def update_performance(n_clicks, initial_balance, session):
     if not session:
         return empty_fig, empty_fig, [], "⚠️ Sin sesión"
     
-    if not initial_balance or initial_balance <= 0:
-        return empty_fig, empty_fig, [], "⚠️ Ingresá un capital inicial válido"
-    
     user = session['user']
     
+    # Leer capital inicial de la config (mismo que Analytics)
+    conf = session.get('config', {})
+    initial_balance = conf.get('initial_balance', 10000)
+    
+    try:
+        initial_balance = float(initial_balance)
+    except:
+        initial_balance = 10000.0
+    
+    if initial_balance <= 0:
+        return empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics"
+    
     # ── CACHE CHECK ──
-    cache_key = f"{user}_{initial_balance}"
+    cache_key = f"{user}_{initial_balance}_{period}"
     now = dt_datetime.now()
     
     if cache_key in _perf_cache:
@@ -1651,15 +1680,53 @@ def update_performance(n_clicks, initial_balance, session):
         else:
             print(f"[PERF] 🔄 Cache expirado ({elapsed:.0f}s)")
     
-    # ── CÁLCULO NORMAL ──
+    # ── OBTENER TRADES ──
     df_closed = db.get_closed_trades(user)
     print(f"[PERF] Trades cerrados: {len(df_closed)}")
     
     if df_closed.empty:
         return empty_fig, empty_fig, [], "⚠️ No hay trades cerrados para calcular"
     
+    # ── FILTRAR POR PERIODO ──
+    df_closed['exit_date_dt'] = pd.to_datetime(df_closed['exit_date'])
+    today = pd.Timestamp.now().normalize()
+    
+    if period == "YTD":
+        start_of_year = pd.Timestamp(today.year, 1, 1)
+        # Incluir trades que estaban abiertos al inicio del año O se abrieron este año
+        df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
+        mask = (df_closed['exit_date_dt'] >= start_of_year) | \
+               ((df_closed['entry_date_dt'] < start_of_year) & (df_closed['exit_date_dt'] >= start_of_year))
+        df_filtered = df_closed[mask].copy()
+        period_label = f"YTD ({today.year})"
+        
+    elif period == "YOY":
+        one_year_ago = today - pd.DateOffset(years=1)
+        df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
+        mask = (df_closed['exit_date_dt'] >= one_year_ago)
+        df_filtered = df_closed[mask].copy()
+        period_label = f"Último Año ({one_year_ago.strftime('%Y-%m-%d')} → hoy)"
+        
+    else:  # ALL
+        df_filtered = df_closed.copy()
+        period_label = "Todo el historial"
+    
+    # Limpiar columnas auxiliares
+    for col in ['exit_date_dt', 'entry_date_dt']:
+        if col in df_filtered.columns:
+            df_filtered = df_filtered.drop(columns=[col])
+    for col in ['exit_date_dt', 'entry_date_dt']:
+        if col in df_closed.columns:
+            df_closed = df_closed.drop(columns=[col])
+    
+    if df_filtered.empty:
+        return empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}"
+    
+    print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)}")
+    
+    # ── CALCULAR PORTFOLIO ──
     try:
-        daily_df = build_daily_portfolio(df_closed, initial_balance)
+        daily_df = build_daily_portfolio(df_filtered, initial_balance)
         print(f"[PERF] ✅ Portfolio calculado: {len(daily_df)} días")
         
         if daily_df.empty:
@@ -1676,40 +1743,55 @@ def update_performance(n_clicks, initial_balance, session):
     total_return = (total_end / initial_balance - 1) * 100
     total_pnl = total_end - initial_balance
     
+    # Drawdown
     cummax = daily_df['total_value'].cummax()
-    drawdown = (daily_df['total_value'] - cummax) / cummax
-    max_dd = drawdown.min() * 100
+    daily_df['drawdown_pct'] = ((daily_df['total_value'] - cummax) / cummax) * 100
+    max_dd = daily_df['drawdown_pct'].min()
+    current_dd = daily_df['drawdown_pct'].iloc[-1]
     
-    kpis_layout = dbc.Row([
+    # Best/worst day
+    best_day_ret = daily_df['daily_return'].max() * 100
+    worst_day_ret = daily_df['daily_return'].min() * 100
+    
+    kpis_layout = html.Div(dbc.Row([
         dbc.Col(html.Div([
             html.P(f"${initial_balance:,.0f}", style=KPI_VAL_STYLE),
             html.P("CAPITAL INICIAL", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width=2),
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
         dbc.Col(html.Div([
             html.P(f"${total_end:,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
             html.P("VALOR FINAL", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width=2),
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
         dbc.Col(html.Div([
             html.P(f"{total_return:+.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_return >= 0 else COLOR_NEG}),
             html.P("RETORNO TOTAL", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width=2),
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
         dbc.Col(html.Div([
             html.P(f"${total_pnl:+,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
             html.P("GANANCIA/PÉRDIDA", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width=2),
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
         dbc.Col(html.Div([
             html.P(f"{max_dd:.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_NEG}),
-            html.P("DRAWDOWN MÁXIMO", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width=2),
+            html.P("MAX DRAWDOWN", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
+        dbc.Col(html.Div([
+            html.P(f"{current_dd:.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_NEG if current_dd < 0 else COLOR_POS}),
+            html.P("DD ACTUAL", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
+        dbc.Col(html.Div([
+            html.P(f"{len(df_filtered)}", style=KPI_VAL_STYLE),
+            html.P("TRADES", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
         dbc.Col(html.Div([
             html.P(f"{len(daily_df)}", style=KPI_VAL_STYLE),
-            html.P("DÍAS ACTIVOS", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width=2),
-    ])
+            html.P("DÍAS", style=KPI_LBL_STYLE)
+        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
+    ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
     
-    # ── GRÁFICO 1: Retorno acumulado ──
+    # ── GRÁFICO 1: Retorno Acumulado ──
     fig_cumulative = go.Figure()
     ret_pct = daily_df['cumulative_return'] * 100
+    
     fig_cumulative.add_trace(go.Scatter(
         x=daily_df['date'], y=ret_pct, mode='lines',
         line=dict(color=COLOR_POS, width=2.5),
@@ -1719,40 +1801,55 @@ def update_performance(n_clicks, initial_balance, session):
     ))
     fig_cumulative.add_hline(y=0, line_dash="dash", line_color=COLOR_NEUTRAL, line_width=1, opacity=0.5)
     fig_cumulative.update_layout(
-        title={'text': 'RETORNO ACUMULADO (%)', 'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.5, 'xanchor': 'center'},
-        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
-        hovermode='x unified', margin=dict(l=60, r=30, t=60, b=50),
-        yaxis=dict(title="Retorno (%)", showgrid=True, gridcolor=BORDER_COLOR, ticksuffix='%'),
-        xaxis=dict(title="Fecha", showgrid=False), showlegend=False
+        title={'text': f'RETORNO ACUMULADO (%) — {period_label}', 
+               'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 
+               'x': 0.5, 'xanchor': 'center'},
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG,
+        font_color=TEXT_MAIN, font_family="Consolas, monospace",
+        hovermode='x unified',
+        margin=dict(l=60, r=30, t=50, b=10),
+        yaxis=dict(title="Retorno (%)", showgrid=True, gridcolor=BORDER_COLOR, 
+                   zerolinecolor=BORDER_COLOR, ticksuffix='%'),
+        xaxis=dict(showgrid=False),
+        showlegend=False
     )
     
-    # ── GRÁFICO 2: Composición ──
-    fig_composition = go.Figure()
-    fig_composition.add_trace(go.Scatter(
-        x=daily_df['date'], y=daily_df['cash'], mode='lines', name='Efectivo',
-        line=dict(color='#70AD47', width=0), stackgroup='one', fillcolor='rgba(112, 173, 71, 0.7)'
+    # ── GRÁFICO 2: Drawdown % ──
+    fig_drawdown = go.Figure()
+    
+    fig_drawdown.add_trace(go.Scatter(
+        x=daily_df['date'],
+        y=daily_df['drawdown_pct'],
+        mode='lines',
+        line=dict(color=COLOR_NEG, width=1.5),
+        fill='tozeroy',
+        fillcolor='rgba(246, 70, 93, 0.2)',
+        name='Drawdown',
+        hovertemplate='%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>'
     ))
-    fig_composition.add_trace(go.Scatter(
-        x=daily_df['date'], y=daily_df['equity_value'], mode='lines', name='Equity',
-        line=dict(color='#ED7D31', width=0), stackgroup='one', fillcolor='rgba(237, 125, 49, 0.7)'
-    ))
-    fig_composition.update_layout(
-        title={'text': 'COMPOSICIÓN (EFECTIVO VS EQUITY)', 'font': {'size': 16, 'color': TEXT_MAIN, 'family': 'Consolas'}, 'x': 0.5, 'xanchor': 'center'},
-        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas",
-        hovermode='x unified', margin=dict(l=60, r=30, t=60, b=50),
-        yaxis=dict(title="Valor ($)", showgrid=True, gridcolor=BORDER_COLOR, tickformat='$,.0f'),
+    
+    fig_drawdown.update_layout(
+        title={'text': 'DRAWDOWN (%)', 
+               'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 
+               'x': 0.5, 'xanchor': 'center'},
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG,
+        font_color=TEXT_MAIN, font_family="Consolas, monospace",
+        hovermode='x unified',
+        margin=dict(l=60, r=30, t=40, b=30),
+        yaxis=dict(title="DD (%)", showgrid=True, gridcolor=BORDER_COLOR, 
+                   zerolinecolor=BORDER_COLOR, ticksuffix='%'),
         xaxis=dict(title="Fecha", showgrid=False),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        showlegend=False
     )
     
-    status = f"✓ Portfolio calculado: {len(daily_df)} días | Retorno: {total_return:+.2f}%"
+    status = f"✓ {period_label} | {len(df_filtered)} trades | {len(daily_df)} días | Retorno: {total_return:+.2f}%"
     print(f"[PERF] ✅ ÉXITO: {status}")
     
     # ── GUARDAR EN CACHE ──
-    result = (fig_cumulative, fig_composition, kpis_layout, status)
+    result = (fig_cumulative, fig_drawdown, kpis_layout, status)
     _perf_cache[cache_key] = result
     _perf_cache_time[cache_key] = now
-    print(f"[PERF] 💾 Resultado cacheado para {cache_key}")
+    print(f"[PERF] 💾 Cacheado: {cache_key}")
     
     return result
 
@@ -1761,6 +1858,7 @@ def update_performance(n_clicks, initial_balance, session):
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
