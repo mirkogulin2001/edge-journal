@@ -943,6 +943,7 @@ app.validation_layout = html.Div([
     html.Button(id="btn-perf-ytd"),
     html.Button(id="btn-perf-yoy"),
     html.Button(id="btn-perf-all"),
+    html.Button(id="btn-perf-2025"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1182,6 +1183,8 @@ def render_tab(tab, session):
                                    style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),
                         dbc.Button("ALL DATA", id="btn-perf-all", color="dark", outline=True, size="sm",
                                    style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),
+                        dbc.Button("2025", id="btn-perf-2025", color="dark", outline=True, size="sm",
+                                   style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),                    
                     ], size="sm")
                 ], width=4),
                 
@@ -1620,14 +1623,15 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
         Output("perf-status", "children")
     ],
     [
-        Input("btn-perf-ytd", "n_clicks"),
-        Input("btn-perf-yoy", "n_clicks"),
-        Input("btn-perf-all", "n_clicks"),
+    Input("btn-perf-ytd", "n_clicks"),
+    Input("btn-perf-yoy", "n_clicks"),
+    Input("btn-perf-all", "n_clicks"),
+    Input("btn-perf-2025", "n_clicks"),
     ],
     [State("session-store", "data")],
     prevent_initial_call=True
 )
-def update_performance(n_ytd, n_yoy, n_all, session):
+def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     """Calcula y muestra el retorno acumulado del portfolio por periodo."""
     
     # Determinar qué botón se apretó
@@ -1636,6 +1640,8 @@ def update_performance(n_ytd, n_yoy, n_all, session):
         period = "YTD"
     elif triggered == "btn-perf-yoy":
         period = "YOY"
+    elif triggered == "btn-perf-2025":
+        period = "2025"    
     else:
         period = "ALL"
     
@@ -1706,7 +1712,13 @@ def update_performance(n_ytd, n_yoy, n_all, session):
         mask = (df_closed['exit_date_dt'] >= one_year_ago)
         df_filtered = df_closed[mask].copy()
         period_label = f"Último Año ({one_year_ago.strftime('%Y-%m-%d')} → hoy)"
-        
+    elif period == "2025":
+        start_2025 = pd.Timestamp(2025, 1, 1)
+        end_2025 = pd.Timestamp(2025, 12, 31)
+        df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
+        mask = (df_closed['exit_date_dt'] >= start_2025) & (df_closed['exit_date_dt'] <= end_2025)
+        df_filtered = df_closed[mask].copy()
+        period_label = "Año 2025"    
     else:  # ALL
         df_filtered = df_closed.copy()
         period_label = "Todo el historial"
@@ -1858,6 +1870,7 @@ def update_performance(n_ytd, n_yoy, n_all, session):
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
