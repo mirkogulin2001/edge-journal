@@ -200,26 +200,36 @@ def safe_float(val):
         elif ',' in s: s = s.replace(',', '.')
         return float(s)
     except: return 0.0
-def build_daily_portfolio(df_closed, initial_balance):
+def build_daily_portfolio(df_closed, initial_balance, df_open=None):
     """
     Calcula el valor diario del portfolio basado en trades históricos.
     Descarga precios diarios vía yfinance para posiciones abiertas en cada día.
-    
+
     Args:
-        df_closed: DataFrame con trades cerrados (columnas: symbol, entry_date, exit_date, 
+        df_closed: DataFrame con trades cerrados (columnas: symbol, entry_date, exit_date,
                    entry_price, exit_price, quantity, side)
         initial_balance: Capital inicial del portfolio
-    
+        df_open: DataFrame con trades abiertos (opcional). Se incluyen desde entry_date hasta hoy.
+
     Returns:
         DataFrame con: date, total_value, cumulative_return, daily_return
     """
-    if df_closed.empty:
+    # Combinar trades cerrados y abiertos
+    df_parts = []
+    if not df_closed.empty:
+        df_c = df_closed.copy()
+        df_c['entry_date'] = pd.to_datetime(df_c['entry_date']).dt.normalize()
+        df_c['exit_date'] = pd.to_datetime(df_c['exit_date']).dt.normalize()
+        df_parts.append(df_c)
+    if df_open is not None and not df_open.empty:
+        df_o = df_open[['symbol', 'side', 'entry_date', 'entry_price', 'quantity']].copy()
+        df_o['entry_date'] = pd.to_datetime(df_o['entry_date']).dt.normalize()
+        df_o['exit_date'] = pd.NaT
+        df_o['exit_price'] = np.nan
+        df_parts.append(df_o)
+    if not df_parts:
         return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return'])
-    
-    # Preparar datos
-    df = df_closed.copy()
-    df['entry_date'] = pd.to_datetime(df['entry_date']).dt.normalize()
-    df['exit_date'] = pd.to_datetime(df['exit_date']).dt.normalize()
+    df = pd.concat(df_parts, ignore_index=True)
     
     # Rango de fechas
     start_date = df['entry_date'].min().date()
@@ -243,8 +253,13 @@ def build_daily_portfolio(df_closed, initial_balance):
         
         print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
         
-        # Formatear precios
-        if len(tickers) == 1:
+        # Formatear precios: siempre producir columnas simples {ticker: precio_cierre}
+        # yfinance puede retornar MultiIndex (Price, Ticker) o columnas simples según versión
+        if isinstance(prices_raw.columns, pd.MultiIndex):
+            prices = prices_raw["Close"]  # DataFrame con tickers como columnas simples
+            if isinstance(prices, pd.Series):
+                prices = prices.to_frame(name=tickers[0])
+        elif len(tickers) == 1:
             prices = prices_raw[["Close"]].rename(columns={"Close": tickers[0]})
         else:
             prices = prices_raw["Close"]
@@ -261,55 +276,61 @@ def build_daily_portfolio(df_closed, initial_balance):
         raise Exception(f"No se pudieron descargar precios de Yahoo Finance. Verificá tu conexión a internet. Error: {str(e)}")
     
     # Calcular cash flows en cada fecha
+    # --- LÓGICA DE CASH FLOW INSTITUCIONAL (LONG / SHORT) ---
     cash_flows = {}
     for _, trade in df.iterrows():
         entry = trade['entry_date']
         cost = trade['quantity'] * trade['entry_price']
-        cash_flows[entry] = cash_flows.get(entry, 0) - cost
-        
         exit_d = trade['exit_date']
-        if pd.notna(exit_d):
-            revenue = trade['quantity'] * trade['exit_price']
-            cash_flows[exit_d] = cash_flows.get(exit_d, 0) + revenue
-    
-    # Calcular valor diario
+        revenue = trade['quantity'] * trade['exit_price'] if pd.notna(exit_d) else 0
+        
+        if trade['side'] == 'LONG':
+            # LONG: Pago al entrar, cobro al salir
+            cash_flows[entry] = cash_flows.get(entry, 0) - cost
+            if pd.notna(exit_d):
+                cash_flows[exit_d] = cash_flows.get(exit_d, 0) + revenue
+        else:
+            # SHORT: Cobro al vender corto, pago para recomprar
+            cash_flows[entry] = cash_flows.get(entry, 0) + cost
+            if pd.notna(exit_d):
+                cash_flows[exit_d] = cash_flows.get(exit_d, 0) - revenue
+
     all_dates = prices.index
     daily_values = []
     cash = initial_balance
     
     for day in all_dates:
-        # Actualizar cash con flujos del día
+        # Sumamos/Restamos el flujo de caja del día
         cash += cash_flows.get(day, 0)
         
-        # Posiciones abiertas en este día
-        open_trades = df[
-            (df['entry_date'] <= day) &
-            ((df['exit_date'].isna()) | (df['exit_date'] > day))
-        ]
-        
-        # Valorar posiciones abiertas
+        # Posiciones abiertas (Liability en caso de Shorts)
+        open_trades = df[(df['entry_date'] <= day) & ((df['exit_date'].isna()) | (df['exit_date'] > day))]
         equity = 0.0
+        
         for _, trade in open_trades.iterrows():
             ticker = trade['symbol']
-            if ticker in prices.columns and pd.notna(prices.loc[day, ticker]):
-                price = prices.loc[day, ticker]
-                if trade['side'] == 'LONG':
-                    equity += trade['quantity'] * price
-                else:  # SHORT
-                    # Para shorts: valor = capital inicial - pérdida/ganancia
-                    equity += trade['quantity'] * (2 * trade['entry_price'] - price)
-        
+            
+            # Obtener precio actual o usar el de entrada como fallback
+            # Usamos .at para garantizar acceso escalar (evita Series con MultiIndex)
+            if ticker in prices.columns:
+                price = prices.at[day, ticker]
+                if pd.isna(price):
+                    price = trade['entry_price']
+            else:
+                price = trade['entry_price']
+                
+            if trade['side'] == 'LONG': 
+                equity += trade['quantity'] * price
+            else: 
+                # SHORT: El valor de la posición es un pasivo (lo que cuesta recomprar)
+                equity -= trade['quantity'] * price
+                
+        # Total = Efectivo en cuenta + Valor de las inversiones (o - deudas short)
         total = cash + equity
-        daily_values.append({
-            'date': day,
-            'total_value': total,
-            'cash': cash,
-            'equity_value': equity
-        })
-    
-    # Crear DataFrame resultado
+        daily_values.append({'date': day, 'total_value': total, 'cash': cash, 'equity_value': equity})
+
     result = pd.DataFrame(daily_values)
-    result['daily_return'] = result['total_value'].pct_change()
+    result['daily_return'] = result['total_value'].pct_change().fillna(0)
     result['cumulative_return'] = (result['total_value'] / initial_balance - 1)
     
     return result
@@ -912,7 +933,7 @@ global_modals = html.Div([
 ])
 
 def layout_login():
-    return dbc.Row([dbc.Col(dbc.Card([dbc.CardBody([html.H2("EDGE PRO", className="text-center mb-4 fw-bold", style={"color": TEXT_MAIN, "letterSpacing": "2px"}), dbc.Input(id="user-in", placeholder="Usuario", className="mb-3 p-3", style=INPUT_STYLE), dbc.Input(id="pass-in", placeholder="Password", type="password", className="mb-4 p-3", style=INPUT_STYLE), dbc.Button("INICIAR SESION", id="login-btn", color="success", className="w-100 mb-3 p-3 fw-bold", style={"backgroundColor": COLOR_POS, "color": "#000", "border": "none", "fontFamily": "Consolas"}), dbc.Button("Crear Cuenta", id="open-reg", color="link", className="w-100 text-decoration-none", style={"color": COLOR_NEUTRAL, "fontFamily": "Consolas"})])], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 20px 40px rgba(0,0,0,0.4)"}), width={"size": 4, "offset": 4}, className="mt-5 pt-5")])
+    return dbc.Row([dbc.Col(dbc.Card([dbc.CardBody([html.H2("Edge Journal", className="text-center mb-4 fw-bold", style={"color": TEXT_MAIN, "letterSpacing": "1px"}), dbc.Input(id="user-in", placeholder="Usuario", className="mb-3 p-3", style=INPUT_STYLE), dbc.Input(id="pass-in", placeholder="Password", type="password", className="mb-3 p-3", style=INPUT_STYLE), html.Div(id="login-msg", style={"color": COLOR_NEG, "fontSize": "0.85rem", "fontFamily": "Consolas", "minHeight": "24px", "marginBottom": "10px", "textAlign": "center"}), dbc.Button("INICIAR SESION", id="login-btn", color="success", className="w-100 mb-3 p-3 fw-bold", style={"backgroundColor": COLOR_POS, "color": "#000", "border": "none", "fontFamily": "Consolas"}), dbc.Button("Crear Cuenta", id="open-reg", color="link", className="w-100 text-decoration-none", style={"color": COLOR_NEUTRAL, "fontFamily": "Consolas"})])], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 20px 40px rgba(0,0,0,0.4)"}), width={"size": 4, "offset": 4}, className="mt-5 pt-5")])
 
 def layout_dashboard(username):
     return html.Div([
@@ -966,17 +987,27 @@ app.validation_layout = html.Div([
     html.Button(id="btn-perf-yoy"),
     html.Button(id="btn-perf-all"),
     html.Button(id="btn-perf-2025"),
+    html.Div(id="login-msg"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
 def render_page(s): return layout_dashboard(s['user']) if s and 'user' in s else layout_login()
 
-@app.callback(Output('session-store', 'data'), Input('login-btn', 'n_clicks'), State('user-in', 'value'), prevent_initial_call=True)
-def handle_login(n_clicks, u):
-    if n_clicks and u:
+@app.callback(
+    [Output('session-store', 'data'), Output('login-msg', 'children')],
+    Input('login-btn', 'n_clicks'),
+    [State('user-in', 'value'), State('pass-in', 'value')],
+    prevent_initial_call=True
+)
+def handle_login(n_clicks, u, p):
+    if n_clicks:
+        if not u or not p:
+            return no_update, "Ingresá usuario y contraseña."
         user = db.get_user(u)
-        if user: return {'user': u, 'config': user.get('config', {})}
-    return no_update
+        if not user or user.get('password_hash') != p:
+            return no_update, "Usuario o contraseña incorrectos."
+        return {'user': u, 'config': user.get('config', {})}, ""
+    return no_update, no_update
 
 @app.callback(Output('session-store', 'data', allow_duplicate=True), Input('logout-btn', 'n_clicks'), prevent_initial_call=True)
 def handle_logout(n_clicks):
@@ -1164,7 +1195,7 @@ def render_tab(tab, session):
     elif tab == 'tab-montecarlo':
         return html.Div([
             dbc.Row([
-                dbc.Col([html.H3("MONTECARLO ENGINE", className="fw-bold text-light"), html.P("Generador de escenarios estocasticos basado en distr. de R.", className="text-muted")], width=6),
+                dbc.Col([html.H3("Simulador de Montecarlo", className="fw-bold",style={"color": TEXT_MAIN}), html.P("Generador de escenarios estocasticos basado en distr. de R.", className="text-muted")], width=6),
                 dbc.Col([dbc.Label("N° Iteraciones", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-n-sim", type="number", value=3000, min=100, max=10000, style=INPUT_STYLE)], width=3),
                 dbc.Col([dbc.Label("Kelly Fraction (f*)", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-kelly-frac", type="number", value=1.0, min=0.1, max=2.0, step=0.01, style=INPUT_STYLE)], width=3),
             ], className="mb-4 align-items-center"),
@@ -1284,13 +1315,14 @@ def render_tab(tab, session):
                             dbc.Table([
                                 html.Thead(html.Tr([html.Th("Columna"), html.Th("Descripción"), html.Th("Ejemplo")])),
                                 html.Tbody([
-                                    html.Tr([html.Td("TICKER / SYMBOL"), html.Td("Símbolo del activo operado"), html.Td("AAPL, EURUSD, BTC")]),
+                                    html.Tr([html.Td("SYMBOL"), html.Td("Símbolo del activo operado"), html.Td("AAPL, EURUSD, BTC")]),
                                     html.Tr([html.Td("SIDE"), html.Td("Dirección de la operación"), html.Td("LONG / SHORT")]),
                                     html.Tr([html.Td("QTY / QUANTITY"), html.Td("Cantidad de contratos/acciones"), html.Td("10, 100")]),
-                                    html.Tr([html.Td("PRECIO IN / ENTRY"), html.Td("Precio de entrada promedio"), html.Td("150.50")]),
-                                    html.Tr([html.Td("PRECIO OUT / EXIT"), html.Td("Precio de salida (Opcional, si está cerrado)"), html.Td("155.00")]),
-                                    html.Tr([html.Td("SL / STOP LOSS"), html.Td("Stop Loss inicial (Vital para cálculo de R)"), html.Td("148.00")]),
-                                    html.Tr([html.Td("FECHA / DATE"), html.Td("Fecha de entrada (YYYY-MM-DD)"), html.Td("2023-10-25")]),
+                                    html.Tr([html.Td("Entry_price"), html.Td("Precio de entrada promedio"), html.Td("150.50")]),
+                                    html.Tr([html.Td("Exit_price"), html.Td("Precio de salida (Opcional, si está cerrado)"), html.Td("155.00")]),
+                                    html.Tr([html.Td("Initial_stop_loss"), html.Td("Stop Loss inicial (Vital para cálculo de R)"), html.Td("148.00")]),
+                                    html.Tr([html.Td("Entry_date"), html.Td("Fecha de entrada (YYYY-MM-DD)"), html.Td("2023-10-25")]),
+                                    html.Tr([html.Td("Exit_date"), html.Td("Fecha de salida (YYYY-MM-DD)"), html.Td("2023-10-25")]),
                                     html.Tr([html.Td("RESULTADO"), html.Td("Estado final (WIN / LOSS / BE)"), html.Td("WIN")])
                                 ])
                             ], bordered=True, hover=True, style={"fontSize": "0.9rem"}),
@@ -1709,40 +1741,53 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # ── OBTENER TRADES ──
     df_closed = db.get_closed_trades(user)
-    print(f"[PERF] Trades cerrados: {len(df_closed)}")
-    
-    if df_closed.empty:
-        return empty_fig, empty_fig, [], "⚠️ No hay trades cerrados para calcular"
+    df_open = db.get_open_trades(user)
+    print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}")
+
+    if df_closed.empty and df_open.empty:
+        return empty_fig, empty_fig, [], "⚠️ No hay trades para calcular"
     
     # ── FILTRAR POR PERIODO ──
-    df_closed['exit_date_dt'] = pd.to_datetime(df_closed['exit_date'])
     today = pd.Timestamp.now().normalize()
-    
-    if period == "YTD":
-        start_of_year = pd.Timestamp(today.year, 1, 1)
-        # Incluir trades que estaban abiertos al inicio del año O se abrieron este año
-        df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
-        mask = (df_closed['exit_date_dt'] >= start_of_year) | \
-               ((df_closed['entry_date_dt'] < start_of_year) & (df_closed['exit_date_dt'] >= start_of_year))
-        df_filtered = df_closed[mask].copy()
-        period_label = f"YTD ({today.year})"
-        
-    elif period == "YOY":
-        one_year_ago = today - pd.DateOffset(years=1)
-        df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
-        mask = (df_closed['exit_date_dt'] >= one_year_ago)
-        df_filtered = df_closed[mask].copy()
-        period_label = f"Último Año ({one_year_ago.strftime('%Y-%m-%d')} → hoy)"
-    elif period == "2025":
-        start_2025 = pd.Timestamp(2025, 1, 1)
-        end_2025 = pd.Timestamp(2025, 12, 31)
-        df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
-        mask = (df_closed['exit_date_dt'] >= start_2025) & (df_closed['exit_date_dt'] <= end_2025)
-        df_filtered = df_closed[mask].copy()
-        period_label = "Año 2025"    
-    else:  # ALL
-        df_filtered = df_closed.copy()
-        period_label = "Todo el historial"
+
+    if df_closed.empty:
+        df_filtered = pd.DataFrame()
+        if period == "YTD":
+            period_label = f"YTD ({today.year})"
+        elif period == "YOY":
+            one_year_ago = today - pd.DateOffset(years=1)
+            period_label = f"Último Año ({one_year_ago.strftime('%Y-%m-%d')} → hoy)"
+        elif period == "2025":
+            period_label = "Año 2025"
+        else:
+            period_label = "Todo el historial"
+    else:
+        df_closed['exit_date_dt'] = pd.to_datetime(df_closed['exit_date'])
+        if period == "YTD":
+            start_of_year = pd.Timestamp(today.year, 1, 1)
+            # Incluir trades que estaban abiertos al inicio del año O se abrieron este año
+            df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
+            mask = (df_closed['exit_date_dt'] >= start_of_year) | \
+                   ((df_closed['entry_date_dt'] < start_of_year) & (df_closed['exit_date_dt'] >= start_of_year))
+            df_filtered = df_closed[mask].copy()
+            period_label = f"YTD ({today.year})"
+
+        elif period == "YOY":
+            one_year_ago = today - pd.DateOffset(years=1)
+            df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
+            mask = (df_closed['exit_date_dt'] >= one_year_ago)
+            df_filtered = df_closed[mask].copy()
+            period_label = f"Último Año ({one_year_ago.strftime('%Y-%m-%d')} → hoy)"
+        elif period == "2025":
+            start_2025 = pd.Timestamp(2025, 1, 1)
+            end_2025 = pd.Timestamp(2025, 12, 31)
+            df_closed['entry_date_dt'] = pd.to_datetime(df_closed['entry_date'])
+            mask = (df_closed['exit_date_dt'] >= start_2025) & (df_closed['exit_date_dt'] <= end_2025)
+            df_filtered = df_closed[mask].copy()
+            period_label = "Año 2025"
+        else:  # ALL
+            df_filtered = df_closed.copy()
+            period_label = "Todo el historial"
     
     # Limpiar columnas auxiliares
     for col in ['exit_date_dt', 'entry_date_dt']:
@@ -1751,15 +1796,28 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     for col in ['exit_date_dt', 'entry_date_dt']:
         if col in df_closed.columns:
             df_closed = df_closed.drop(columns=[col])
-    
-    if df_filtered.empty:
+
+    # Filtrar trades abiertos por periodo
+    if not df_open.empty:
+        df_open['entry_date_dt'] = pd.to_datetime(df_open['entry_date'])
+        if period == "2025":
+            end_period = pd.Timestamp(2025, 12, 31)
+            df_open_filtered = df_open[df_open['entry_date_dt'] <= end_period].copy()
+        else:
+            # YTD, YOY, ALL: incluir todos los trades actualmente abiertos
+            df_open_filtered = df_open.copy()
+        df_open_filtered = df_open_filtered.drop(columns=['entry_date_dt'])
+    else:
+        df_open_filtered = pd.DataFrame()
+
+    if df_filtered.empty and df_open_filtered.empty:
         return empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}"
-    
-    print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)}")
+
+    print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)} cerrados, {len(df_open_filtered)} abiertos")
     
     # ── CALCULAR PORTFOLIO ──
     try:
-        daily_df = build_daily_portfolio(df_filtered, initial_balance)
+        daily_df = build_daily_portfolio(df_filtered, initial_balance, df_open_filtered)
         # Recortar al periodo
         if period == "2025":
             daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
@@ -1885,7 +1943,8 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     fig_drawdown.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['drawdown_pct'], mode='lines', line=dict(color=COLOR_NEG, width=1.5), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)', name='Drawdown', hovertemplate='%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>'))
     fig_drawdown.update_layout(title={'text': 'DRAWDOWN (%)', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 'x': 0.5, 'xanchor': 'center'}, paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas, monospace", hovermode='x unified', margin=dict(l=60, r=30, t=40, b=30), yaxis=dict(title="DD (%)", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(title="Fecha", showgrid=False), showlegend=False)
     
-    status = f"✓ {period_label} | {len(df_filtered)} trades | {len(daily_df)} días | Retorno: {total_return:+.2f}%"
+    open_count = len(df_open_filtered) if not df_open_filtered.empty else 0
+    status = f"✓ {period_label} | {len(df_filtered)} cerrados + {open_count} abiertos | {len(daily_df)} días | Retorno: {total_return:+.2f}%"
     print(f"[PERF] ✅ {status}")
     
     result = (fig_cumulative, fig_drawdown, kpis_layout, status)
@@ -1899,7 +1958,6 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
-
 
 
 
