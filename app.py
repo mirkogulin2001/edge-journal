@@ -703,18 +703,40 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         fig_evo_ratio.update_layout(title='EVOLUCION RATIO R/B', xaxis_title='Trades', yaxis_title='Ratio', hovermode='x unified', showlegend=False)
         fig_evo_ratio = style_fig(fig_evo_ratio)
 
-        # --- EDGE TEÓRICO ---
-        x_vals = np.linspace(0.15, 0.85, 100)
-        y_be = (0.00 + 1 - x_vals) / x_vals
-        y_good = (0.25 + 1 - x_vals) / x_vals
-        y_exc = (0.50 + 1 - x_vals) / x_vals
+# --- EVOLUCION DEL EDGE (ESPERANZA MATEMATICA) ---
+        # E(x) = (WinRate * R/B) - LossRate (convertido a fracciones para que el resultado sea en 'R')
+        df_closed['cum_edge'] = (df_closed['cum_win_rate'] / 100) * df_closed['cum_ratio'] - (df_closed['cum_loss_rate'] / 100)
         
         fig_edge = go.Figure()
-        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_be, mode='lines', name='Break Even (E=0)', line=dict(color=COLOR_NEG, width=2), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)'))
-        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_good, mode='lines', name='Bueno (E=0.25)', line=dict(color=COLOR_SPY, width=2), fill='tonexty', fillcolor='rgba(252, 213, 53, 0.2)'))
-        fig_edge.add_trace(go.Scatter(x=x_vals*100, y=y_exc, mode='lines', name='Excelente (E=0.5)', line=dict(color=COLOR_POS, width=2), fill='tonexty', fillcolor='rgba(0, 176, 189, 0.2)'))
-        fig_edge.add_trace(go.Scatter(x=[win_rate], y=[ratio_money], mode='markers+text', name='Tu Sistema', marker=dict(color=TEXT_MAIN, size=10, line=dict(color=TEXT_MAIN, width=2)), text=['TU SISTEMA'], textposition='top right', textfont=dict(color=TEXT_MAIN, size=12)))
-        fig_edge.update_layout(title='EDGE TEORICO', xaxis_title='Win Rate (%)', yaxis_title='Ratio R/B', yaxis=dict(range=[0, max(7, ratio_r + 1)]), xaxis=dict(range=[15, 85]), hovermode='x unified', legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99, bgcolor="rgba(0,0,0,0)"))
+        
+        # Trazamos la línea principal con relleno
+        fig_edge.add_trace(go.Scatter(
+            x=df_closed['trade_num'], 
+            y=df_closed['cum_edge'], 
+            mode='lines', 
+            name='Esperanza', 
+            line=dict(color=COLOR_POS, width=2.5), 
+            fill='tozeroy', 
+            fillcolor='rgba(0, 176, 189, 0.15)',
+            hovertemplate='Trade %{x}<br>Edge Esperado: %{y:.2f}R<extra></extra>'
+        ))
+        
+        # Línea de Break Even en 0 (Línea crítica de supervivencia)
+        fig_edge.add_hline(
+            y=0, 
+            line_dash="dash", 
+            line_color=COLOR_NEG, 
+            line_width=1.5, 
+            opacity=0.8
+        )
+        
+        fig_edge.update_layout(
+            title='EVOLUCION DEL EDGE (ESPERANZA EN R)', 
+            xaxis_title='Trades', 
+            yaxis_title='Esperanza (R)', 
+            hovermode='x unified', 
+            showlegend=False
+        )
         fig_edge = style_fig(fig_edge)
 
         # --- HISTOGRAMA PNL ---
@@ -1338,19 +1360,12 @@ def render_tab(tab, session):
                                     html.P([html.B("Short:"), " (P. Entrada - P. Salida) * Cantidad"])
                                 ], title="PnL (Profit and Loss)"),
 
-                                # --- NUEVO ITEM: UNIDAD DE RIESGO ---
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Medida estandarizada del riesgo inicial asumido en una operación."]),
                                     html.P([html.B("Cálculo:"), " 1R = |Precio Entrada - Stop Loss|"]),
                                     html.P("Permite comparar el desempeño de operaciones con distintos precios y volatilidades.")
                                 ], title="Unidad de Riesgo (RR)"),
 
-                                dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Representación gráfica de la evolución del capital."]),
-                                    html.P([html.B("Fórmula:"), " Equity_actual = Balance_inicial + Suma(PnL)"])
-                                ], title="Equity Curve"),
-
-                                # --- MODIFICADO: WIN RATE / LOSS RATE ---
                                 dbc.AccordionItem([
                                     html.P([html.B("Win Rate:"), " % de operaciones ganadoras respecto al total (sin contar Break Even)."]),
                                     html.P([html.B("Loss Rate:"), " % de operaciones perdedoras respecto al total (sin contar Break Even)."])
@@ -1361,7 +1376,6 @@ def render_tab(tab, session):
                                     html.P([html.B("Fórmula:"), " B = Avg Win ($) / |Avg Loss ($)|"])
                                 ], title="Ratio Riesgo/Beneficio Histórico"),
 
-                                # --- MODIFICADO: ESPERANZA MATEMATICA ---
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Valor promedio esperado por cada operación a largo plazo."]),
                                     html.P("Si es positiva, el sistema es rentable."),
@@ -1369,37 +1383,44 @@ def render_tab(tab, session):
                                 ], title="Esperanza Matemática E(x)"),
 
                                 dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Nivel de precio que invalida la operación y limita la pérdida."]),
-                                    html.P("En este sistema, la distancia (Entrada - SL) define la unidad de riesgo '1R'.")
-                                ], title="Stop Loss (SL)"),
-
-                                dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Punto donde la operación no gana ni pierde (Entrada = Salida)."])
-                                ], title="Break Even (BE)"),
-
-                                dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Porcentaje teórico de capital a arriesgar para maximizar el crecimiento geométrico."]),
-                                    html.P([html.B("Fórmula:"), " K% = (W * (B + 1) - 1) / B"])
+                                    html.P([html.B("Fórmula:"), " K% = (W * (B + 1) - 1) / B, B=payoff average historico , W=Winrate"])
                                 ], title="Criterio de Kelly"),
-
-                                dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Tasa a la cual crece el capital compuesto dado un riesgo 'f'."]),
-                                    html.P([html.B("Fórmula:"), " G(f) = [(1 + f*B)^W * (1 - f)^L] - 1"])
-                                ], title="Tasa de Crecimiento Geométrico G(f)"),
 
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Mayor caída porcentual desde un pico histórico hasta un valle."]),
                                     html.P([html.B("Fórmula:"), " (Valle - Pico Previo) / Pico Previo"])
                                 ], title="Máximo Drawdown (MDD)"),
 
+                                # --- NUEVOS CONCEPTOS INSTITUCIONALES ---
                                 dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Histograma de frecuencia de resultados monetarios."]),
-                                    html.P([html.B("Asimetría Positiva:"), " Cola extendida hacia la derecha (ganancias grandes, pérdidas controladas)."])
-                                ], title="Distribución y Asimetría"),
+                                    html.P([html.B("Definición:"), " Mide el rendimiento adicional generado por cada unidad de riesgo (volatilidad total) asumida."]),
+                                    html.P([html.B("Fórmula:"), " (Retorno Anualizado - Tasa Libre de Riesgo) / Desviación Estándar de los Retornos."]),
+                                    html.P("Un Sharpe superior a 1.0 se considera bueno; mayor a 2.0 es excelente.")
+                                ], title="Sharpe Ratio"),
 
                                 dbc.AccordionItem([
-                                    html.P([html.B("Definición:"), " Límite del 'peor escenario razonable' (95% de confianza)."]),
-                                    html.P("Indica que en el 95% de las simulaciones, el Drawdown no superó este nivel.")
+                                    html.P([html.B("Definición:"), " Similar al Sharpe Ratio, pero solo penaliza la volatilidad negativa (caídas). No castiga los picos de ganancias."]),
+                                    html.P([html.B("Fórmula:"), " (Retorno Anualizado - Tasa Libre de Riesgo) / Desviación Estándar de Retornos a la baja."]),
+                                    html.P("Suele ser más representativo para traders que buscan asimetría positiva en sus retornos.")
+                                ], title="Sortino Ratio"),
+
+                                dbc.AccordionItem([
+                                    html.P([html.B("Beta (β):"), " Sensibilidad del portafolio frente al mercado (SPY). Un β de 1.2 significa que el portafolio es un 20% más volátil que el SPY."]),
+                                    html.P([html.B("Alpha de Jensen (α):"), " Mide el exceso de retorno que genera una inversión o portfolio en comparación con el retorno esperado según el CAPM. Mide la verdadera habilidad del operador."]),
+                                    html.P([html.B("Fórmula Alpha:"), " (Retorno del Portafolio - Tasa Libre) - [ Beta * (Retorno del Mercado - Tasa Libre) ]"])
+                                ], title="Alpha de Jensen & Beta"),
+
+                                dbc.AccordionItem([
+                                    html.P([html.B("Definición:"), " Tiempo (medido en días) que el portafolio pasa en estado de Drawdown."]),
+                                    html.P("Cuenta los días desde que el capital cae por debajo de su último máximo histórico hasta que logra superarlo nuevamente."),
+                                    html.P("Es una medida psicológica clave para entender la paciencia y disciplina requerida por un sistema.")
+                                ], title="Time Under Water (TUW)"),
+                                # ----------------------------------------
+
+                                dbc.AccordionItem([
+                                    html.P([html.B("Definición:"), " Límite del 'peor escenario razonable' (95% de confianza) arrojado por la simulación de Montecarlo."]),
+                                    html.P("Indica que en el 95% de las iteraciones simuladas, el Drawdown del sistema no superó este nivel de caída.")
                                 ], title="Value at Risk (VaR 95%)")
 
                             ], start_collapsed=True, flush=True)
@@ -1739,145 +1760,145 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     # ── CALCULAR PORTFOLIO ──
     try:
         daily_df = build_daily_portfolio(df_filtered, initial_balance)
+        # Recortar al periodo
         if period == "2025":
-         daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
+            daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
         elif period == "YTD":
-         start_of_year = pd.Timestamp(today.year, 1, 1)
-         daily_df = daily_df[daily_df['date'] >= start_of_year]
+            daily_df = daily_df[daily_df['date'] >= pd.Timestamp(today.year, 1, 1)]
         elif period == "YOY":
-         daily_df = daily_df[daily_df['date'] >= one_year_ago]
-         print(f"[PERF] ✅ Portfolio calculado: {len(daily_df)} días")
+            daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
+        if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío"
         
-        if daily_df.empty:
-            return empty_fig, empty_fig, [], "⚠️ Error: Portfolio vacío"
+        # --- DESCARGA DE SPY PARA BENCHMARK ---
+        start_date_all = daily_df['date'].min()
+        end_date_all = daily_df['date'].max()
+        spy_raw = yf.download("SPY", start=start_date_all, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
         
+        if not spy_raw.empty:
+            if isinstance(spy_raw.columns, pd.MultiIndex):
+                try: spy_series = spy_raw.xs('Close', level=0, axis=1)['SPY']
+                except: spy_series = spy_raw.iloc[:, 0]
+            else:
+                col = 'Close' if 'Close' in spy_raw.columns else spy_raw.columns[0]
+                spy_series = spy_raw[col]
+            spy_aligned = spy_series.reindex(daily_df['date']).ffill().bfill()
+            daily_df['spy_price'] = spy_aligned.values
+        else: 
+            daily_df['spy_price'] = np.nan
+            
     except Exception as e:
-        print(f"[PERF] ❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
         return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}"
     
-    # ── KPIs ──
+    # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
     total_return = (total_end / initial_balance - 1) * 100
     total_pnl = total_end - initial_balance
-    
-    # Drawdown
     cummax = daily_df['total_value'].cummax()
     daily_df['drawdown_pct'] = ((daily_df['total_value'] - cummax) / cummax) * 100
     max_dd = daily_df['drawdown_pct'].min()
     current_dd = daily_df['drawdown_pct'].iloc[-1]
     
-    # Best/worst day
-    best_day_ret = daily_df['daily_return'].max() * 100
-    worst_day_ret = daily_df['daily_return'].min() * 100
+    # --- KPIs AVANZADOS (SPY) ---
+    if 'spy_price' in daily_df.columns and not daily_df['spy_price'].isnull().all():
+        spy_start = daily_df['spy_price'].iloc[0]
+        daily_df['norm_spy'] = ((daily_df['spy_price'] / spy_start) - 1) * 100
+    else:
+        daily_df['norm_spy'] = 0.0
+
+    spy_cummax = daily_df['spy_price'].cummax()
+    daily_df['spy_drawdown_pct'] = ((daily_df['spy_price'] - spy_cummax) / spy_cummax) * 100
+    max_dd_spy = daily_df['spy_drawdown_pct'].min()
+    total_return_spy = daily_df['norm_spy'].iloc[-1]
+
+    # Retornos Diarios
+    port_rets = daily_df['total_value'].pct_change().fillna(0)
+    spy_rets = daily_df['spy_price'].pct_change().fillna(0)
+    rfr_daily = 0.04 / 252 # Tasa libre de riesgo (4% anual)
     
+    def calc_sharpe(rets):
+        if rets.std() == 0: return 0
+        return np.sqrt(252) * (rets.mean() - rfr_daily) / rets.std()
+        
+    def calc_sortino(rets):
+        downside = rets[rets < 0]
+        if len(downside) < 2: return 0
+        down_std = downside.std()
+        if down_std == 0: return 0
+        return np.sqrt(252) * (rets.mean() - rfr_daily) / down_std
+    
+    sharpe_port = calc_sharpe(port_rets)
+    sharpe_spy = calc_sharpe(spy_rets)
+    sortino_port = calc_sortino(port_rets)
+    sortino_spy = calc_sortino(spy_rets)
+    
+    # Alpha y Beta
+    try:
+        cov = np.cov(port_rets, spy_rets)
+        beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 1.0
+        alpha = (port_rets.mean() - rfr_daily) - beta * (spy_rets.mean() - rfr_daily)
+        alpha *= 252 * 100
+    except:
+        beta, alpha = 1.0, 0.0
+
+    # Time Under Water (TUW)
+    is_underwater = daily_df['drawdown_pct'] < -0.0001
+    g = (is_underwater != is_underwater.shift()).cumsum()
+    underwater_streaks = is_underwater.groupby(g).sum()
+    streaks = underwater_streaks[underwater_streaks > 0]
+    max_tuw = streaks.max() if not streaks.empty else 0
+    avg_tuw = streaks.mean() if not streaks.empty else 0
+
+    # --- RENDER DE TARJETAS KPIs ---
+    def make_perf_card(title, main_val_str, sub_text=None, m_color=None):
+        v_style = KPI_VAL_STYLE.copy()
+        if m_color: v_style['color'] = m_color
+        content = [html.P(main_val_str, style=v_style), html.P(title, style=KPI_LBL_STYLE)]
+        if sub_text:
+            content.append(html.P(sub_text, style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "marginTop": "6px", "marginBottom": "0", "fontFamily": "Consolas, monospace"}))
+        return dbc.Col(html.Div(content, style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
+
     kpis_layout = html.Div(dbc.Row([
-        dbc.Col(html.Div([
-            html.P(f"${initial_balance:,.0f}", style=KPI_VAL_STYLE),
-            html.P("CAPITAL INICIAL", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
-        dbc.Col(html.Div([
-            html.P(f"${total_end:,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
-            html.P("VALOR FINAL", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
-        dbc.Col(html.Div([
-            html.P(f"{total_return:+.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_return >= 0 else COLOR_NEG}),
-            html.P("RETORNO TOTAL", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
-        dbc.Col(html.Div([
-            html.P(f"${total_pnl:+,.0f}", style={**KPI_VAL_STYLE, "color": COLOR_POS if total_pnl >= 0 else COLOR_NEG}),
-            html.P("GANANCIA/PÉRDIDA", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
-        dbc.Col(html.Div([
-            html.P(f"{max_dd:.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_NEG}),
-            html.P("MAX DRAWDOWN", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
-        dbc.Col(html.Div([
-            html.P(f"{current_dd:.2f}%", style={**KPI_VAL_STYLE, "color": COLOR_NEG if current_dd < 0 else COLOR_POS}),
-            html.P("DD ACTUAL", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
-        dbc.Col(html.Div([
-            html.P(f"{len(df_filtered)}", style=KPI_VAL_STYLE),
-            html.P("TRADES", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
-        dbc.Col(html.Div([
-            html.P(f"{len(daily_df)}", style=KPI_VAL_STYLE),
-            html.P("DÍAS", style=KPI_LBL_STYLE)
-        ], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1"),
+        make_perf_card("CAPITAL INICIAL", f"${initial_balance:,.0f}"),
+        make_perf_card("RETORNO TOTAL", f"{total_return:+.2f}%", f"SPY: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
+        make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
+        make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
+        make_perf_card("SORTINO RATIO", f"{sortino_port:.2f}", f"SPY: {sortino_spy:.2f}", TEXT_MAIN),
+        make_perf_card("ALPHA (JENSEN)", f"α {alpha:+.2f}%", "Exceso vs Riesgo", COLOR_SPY),
+        make_perf_card("BETA", f"β {beta:.2f}", "Sensibilidad vs SPY", TEXT_MAIN),
+        make_perf_card("TIME UNDER WATER", f"{max_tuw:.0f} Max", f"{avg_tuw:.0f} Promedio (Días)", COLOR_NEG if max_tuw > 0 else TEXT_MAIN),
     ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
     
-    # ── GRÁFICO 1: Retorno Acumulado ──
+    # Gráfico cumulative
     fig_cumulative = go.Figure()
+    # Agregamos la línea del SPY si existe
+    if 'norm_spy' in daily_df.columns:
+        fig_cumulative.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['norm_spy'], mode='lines', line=dict(color='#555555', width=1, dash='dash'), name='SPY'))
+        
     ret_pct = daily_df['cumulative_return'] * 100
-    
-    fig_cumulative.add_trace(go.Scatter(
-        x=daily_df['date'], y=ret_pct, mode='lines',
-        line=dict(color=COLOR_POS, width=2.5),
-        fill='tozeroy', fillcolor='rgba(0, 176, 189, 0.15)',
-        name='Retorno Acumulado',
-        hovertemplate='%{x|%Y-%m-%d}<br>Retorno: %{y:.2f}%<extra></extra>'
-    ))
+    fig_cumulative.add_trace(go.Scatter(x=daily_df['date'], y=ret_pct, mode='lines', line=dict(color=COLOR_POS, width=2.5), fill='tozeroy', fillcolor='rgba(0, 176, 189, 0.15)', name='Retorno Acumulado', hovertemplate='%{x|%Y-%m-%d}<br>Retorno: %{y:.2f}%<extra></extra>'))
     fig_cumulative.add_hline(y=0, line_dash="dash", line_color=COLOR_NEUTRAL, line_width=1, opacity=0.5)
-    fig_cumulative.update_layout(
-        title={'text': f'RETORNO ACUMULADO (%) — {period_label}', 
-               'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 
-               'x': 0.5, 'xanchor': 'center'},
-        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG,
-        font_color=TEXT_MAIN, font_family="Consolas, monospace",
-        hovermode='x unified',
-        margin=dict(l=60, r=30, t=50, b=10),
-        yaxis=dict(title="Retorno (%)", showgrid=True, gridcolor=BORDER_COLOR, 
-                   zerolinecolor=BORDER_COLOR, ticksuffix='%'),
-        xaxis=dict(showgrid=False),
-        showlegend=False
-    )
+    fig_cumulative.update_layout(title={'text': f'RETORNO ACUMULADO (%) — {period_label}', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 'x': 0.5, 'xanchor': 'center'}, paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas, monospace", hovermode='x unified', margin=dict(l=60, r=30, t=50, b=10), yaxis=dict(title="Retorno (%)", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(showgrid=False), showlegend=False)
     
-    # ── GRÁFICO 2: Drawdown % ──
+    # Gráfico drawdown
     fig_drawdown = go.Figure()
-    
-    fig_drawdown.add_trace(go.Scatter(
-        x=daily_df['date'],
-        y=daily_df['drawdown_pct'],
-        mode='lines',
-        line=dict(color=COLOR_NEG, width=1.5),
-        fill='tozeroy',
-        fillcolor='rgba(246, 70, 93, 0.2)',
-        name='Drawdown',
-        hovertemplate='%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>'
-    ))
-    
-    fig_drawdown.update_layout(
-        title={'text': 'DRAWDOWN (%)', 
-               'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 
-               'x': 0.5, 'xanchor': 'center'},
-        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG,
-        font_color=TEXT_MAIN, font_family="Consolas, monospace",
-        hovermode='x unified',
-        margin=dict(l=60, r=30, t=40, b=30),
-        yaxis=dict(title="DD (%)", showgrid=True, gridcolor=BORDER_COLOR, 
-                   zerolinecolor=BORDER_COLOR, ticksuffix='%'),
-        xaxis=dict(title="Fecha", showgrid=False),
-        showlegend=False
-    )
+    fig_drawdown.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['drawdown_pct'], mode='lines', line=dict(color=COLOR_NEG, width=1.5), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)', name='Drawdown', hovertemplate='%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>'))
+    fig_drawdown.update_layout(title={'text': 'DRAWDOWN (%)', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 'x': 0.5, 'xanchor': 'center'}, paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas, monospace", hovermode='x unified', margin=dict(l=60, r=30, t=40, b=30), yaxis=dict(title="DD (%)", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(title="Fecha", showgrid=False), showlegend=False)
     
     status = f"✓ {period_label} | {len(df_filtered)} trades | {len(daily_df)} días | Retorno: {total_return:+.2f}%"
-    print(f"[PERF] ✅ ÉXITO: {status}")
+    print(f"[PERF] ✅ {status}")
     
-    # ── GUARDAR EN CACHE ──
     result = (fig_cumulative, fig_drawdown, kpis_layout, status)
-    _perf_cache[cache_key] = result
-    _perf_cache_time[cache_key] = now
-    print(f"[PERF] 💾 Cacheado: {cache_key}")
-    
+    _perf_cache[cache_key] = result; _perf_cache_time[cache_key] = now
     return result
+
+# ═══════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # IMPORTANTE: Esto va DESPUÉS del callback, al final del archivo
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
-
 
 
 
