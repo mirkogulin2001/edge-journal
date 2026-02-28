@@ -1739,14 +1739,14 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     # ── CALCULAR PORTFOLIO ──
     try:
         daily_df = build_daily_portfolio(df_filtered, initial_balance)
-       if period == "2025":
-        daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
-       elif period == "YTD":
-        start_of_year = pd.Timestamp(today.year, 1, 1)
-        daily_df = daily_df[daily_df['date'] >= start_of_year]
-       elif period == "YOY":
-        daily_df = daily_df[daily_df['date'] >= one_year_ago]
-        print(f"[PERF] ✅ Portfolio calculado: {len(daily_df)} días")
+        if period == "2025":
+         daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
+        elif period == "YTD":
+         start_of_year = pd.Timestamp(today.year, 1, 1)
+         daily_df = daily_df[daily_df['date'] >= start_of_year]
+        elif period == "YOY":
+         daily_df = daily_df[daily_df['date'] >= one_year_ago]
+         print(f"[PERF] ✅ Portfolio calculado: {len(daily_df)} días")
         
         if daily_df.empty:
             return empty_fig, empty_fig, [], "⚠️ Error: Portfolio vacío"
@@ -1877,7 +1877,6 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
-
 
 
 
