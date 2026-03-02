@@ -906,11 +906,10 @@ def get_management_panel():
                     
                     dbc.Tab(label="AJUSTAR SL", children=[
                         dbc.InputGroup([
-                            dbc.InputGroupText("NUEVO SL", style={"backgroundColor": BORDER_COLOR, "color": COLOR_NEUTRAL, "border": "none", "fontFamily": "Consolas"}), 
-                            dbc.Input(id="usl", type="number", style=INPUT_STYLE), 
+                            dbc.InputGroupText("NUEVO SL", style={"backgroundColor": BORDER_COLOR, "color": COLOR_NEUTRAL, "border": "none", "fontFamily": "Consolas"}),
+                            dbc.Input(id="usl", type="number", style=INPUT_STYLE),
                             dbc.Button("ACTUALIZAR", id="btn-sl", color="light", className="text-dark", style={"fontFamily": "Consolas"})
-                        ], className="my-3"), 
-                        dbc.Button("ELIMINAR REGISTRO INDIVIDUAL (DB)", id="btn-del", color="dark", size="sm", className="w-100 mt-2 text-danger border-danger", style={"fontFamily": "Consolas"})
+                        ], className="my-3")
                     ], style=TAB_STYLE, tab_style=TAB_STYLE, active_tab_style=TAB_SELECTED_STYLE),
                     dbc.Tab(label="BORRAR TODO", children=[
                         html.Div([
@@ -919,6 +918,11 @@ def get_management_panel():
                                 id="confirm-del-all-open",
                                 message="¿ESTÁS SEGURO? Se eliminarán TODOS los trades activos sin guardarlos en el historial."
                             )
+                        ], className="my-3")
+                    ], style=TAB_STYLE, tab_style=TAB_STYLE, active_tab_style=TAB_SELECTED_STYLE),
+                    dbc.Tab(label="BORRAR OPERACIÓN", children=[
+                        html.Div([
+                            dbc.Button("ELIMINAR REGISTRO INDIVIDUAL (DB)", id="btn-del", color="dark", size="sm", className="w-100 mt-2 text-danger border-danger", style={"fontFamily": "Consolas"})
                         ], className="my-3")
                     ], style=TAB_STYLE, tab_style=TAB_STYLE, active_tab_style=TAB_SELECTED_STYLE)
                 ])
@@ -938,9 +942,10 @@ def layout_login():
 def layout_dashboard(username):
     return html.Div([
         dbc.Row([
-            dbc.Col(html.Div(f"USER: {username}", style={"color": COLOR_NEUTRAL, "fontSize": "14px", "fontWeight": "bold", "marginTop": "10px"}), width=6), 
-            dbc.Col(html.Div(id="g-msg", className="text-end fw-bold", style={"color": COLOR_NEUTRAL}), width=6)
-        ], className="mb-4 mt-1"), 
+            dbc.Col(html.Div(f"USER: {username}", style={"color": COLOR_NEUTRAL, "fontSize": "14px", "fontWeight": "bold", "marginTop": "10px"}), width="auto"),
+            dbc.Col(html.Div([html.Span("Posiciones abiertas:", style={"color": COLOR_NEUTRAL, "fontSize": "14px", "fontWeight": "bold", "marginRight": "8px", "whiteSpace": "nowrap"}), html.Span(id="header-pills", style={"display": "inline-flex", "flexWrap": "wrap", "gap": "5px", "alignItems": "center"})], style={"display": "flex", "alignItems": "center", "marginTop": "10px"})),
+            dbc.Col(html.Div(id="g-msg", className="text-end fw-bold", style={"color": COLOR_NEUTRAL}), width="auto")
+        ], className="mb-4 mt-1", align="center"),
         
         dcc.Tabs(id="tabs", value='tab-active', children=[
             dcc.Tab(label='OPERATIVA', value='tab-active', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE), 
@@ -957,6 +962,7 @@ def layout_dashboard(username):
 app.layout = html.Div([
     dcc.Store(id='session-store', storage_type='session'),
     dcc.Store(id='selected-trade-store'),
+    dcc.Interval(id='header-interval', interval=60000, n_intervals=0),
     dcc.Location(id='url', refresh=False),
     global_modals,
     dbc.Container([
@@ -992,6 +998,58 @@ app.validation_layout = html.Div([
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
 def render_page(s): return layout_dashboard(s['user']) if s and 'user' in s else layout_login()
+
+@app.callback(Output('header-pills', 'children'), [Input('header-interval', 'n_intervals'), Input('session-store', 'data')])
+def update_header_pills(_n, s):
+    if not s or 'user' not in s:
+        return []
+    df = db.get_open_trades(s['user'])
+    if df.empty:
+        return []
+    symbols = df['symbol'].dropna().unique().tolist()
+    if not symbols:
+        return []
+    pills = []
+    try:
+        raw = yf.download(symbols, period="2d", progress=False, auto_adjust=True)
+        closes = raw['Close'] if 'Close' in raw else raw
+        for sym in symbols:
+            try:
+                if isinstance(closes, pd.Series):
+                    prices = closes
+                elif sym in closes.columns:
+                    prices = closes[sym].dropna()
+                else:
+                    continue
+                if prices.empty:
+                    continue
+                current = float(prices.iloc[-1])
+                if len(prices) >= 2:
+                    prev = float(prices.iloc[-2])
+                    pct = (current - prev) / prev * 100 if prev else 0
+                    sign = "+" if pct >= 0 else ""
+                    label = f"{sym}  {sign}{pct:.2f}%"
+                    color = COLOR_POS if pct >= 0 else COLOR_NEG
+                else:
+                    label = f"{sym}  ${current:.2f}"
+                    color = COLOR_NEUTRAL
+                pills.append(html.Span(label, style={
+                    "backgroundColor": f"{color}22",
+                    "color": color,
+                    "border": f"1px solid {color}55",
+                    "borderRadius": "4px",
+                    "padding": "2px 8px",
+                    "fontSize": "0.72rem",
+                    "fontFamily": "Consolas",
+                    "fontWeight": "bold",
+                    "whiteSpace": "nowrap",
+                    "letterSpacing": "0.5px"
+                }))
+            except Exception:
+                continue
+    except Exception as e:
+        print(f"[ERROR] header pills: {e}")
+    return pills
 
 @app.callback(
     [Output('session-store', 'data'), Output('login-msg', 'children')],
@@ -1095,7 +1153,8 @@ def render_tab(tab, session):
                     dbc.CardHeader("NUEVA OPERACION", style={"backgroundColor": "transparent", "borderBottom": f"1px solid {BORDER_COLOR}", "fontWeight": "bold", "color": TEXT_MAIN}), 
                     dbc.CardBody([
                         dbc.Row([dbc.Col(dbc.Input(id="nt", placeholder="Ticker", style=INPUT_STYLE), width=3), dbc.Col(dbc.Select(id="ns", options=[{"label":"LONG","value":"LONG"},{"label":"SHORT","value":"SHORT"}], value="LONG", style=INPUT_STYLE), width=3), dbc.Col(dbc.Input(id="nq", placeholder="Qty", type="number", style=INPUT_STYLE), width=3), dbc.Col(dbc.Input(id="nd", type="date", value=date.today(), style=INPUT_STYLE), width=3)], className="mb-3"), 
-                        dbc.Row([dbc.Col(dbc.Input(id="np", placeholder="Precio In", type="number", style=INPUT_STYLE), width=6), dbc.Col(dbc.Input(id="nsl", placeholder="SL Inicial", type="number", style=INPUT_STYLE), width=6)]), 
+                        dbc.Row([dbc.Col(dbc.Input(id="np", placeholder="Precio In", type="number", style=INPUT_STYLE), width=6), dbc.Col(dbc.Input(id="nsl", placeholder="SL Inicial", type="number", style=INPUT_STYLE), width=6)]),
+                        html.Div("⚠  Stop Loss Inicial requerido para simulación de riesgo y cálculo de R", id="sl-warning", style={"display": "none"}),
                         html.Div(dyn_inputs), html.Hr(style={"borderColor": BORDER_COLOR}), 
                         
                         # --- NOTAS DE ENTRADA ---
@@ -1195,7 +1254,7 @@ def render_tab(tab, session):
     elif tab == 'tab-montecarlo':
         return html.Div([
             dbc.Row([
-                dbc.Col([html.H3("Simulador de Montecarlo", className="fw-bold",style={"color": TEXT_MAIN}), html.P("Generador de escenarios estocasticos basado en distr. de R.", className="text-muted")], width=6),
+                dbc.Col([html.H3("Simulador de Montecarlo", className="fw-bold",style={"color": TEXT_MAIN}), html.P("Generador de escenarios estocasticos basado en distr. de R.", className="text-muted"), html.P("Se recomienda un mínimo de 50 operaciones para realizar la simulación.", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "Consolas", "marginTop": "-8px"})], width=6),
                 dbc.Col([dbc.Label("N° Iteraciones", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-n-sim", type="number", value=3000, min=100, max=10000, style=INPUT_STYLE)], width=3),
                 dbc.Col([dbc.Label("Kelly Fraction (f*)", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-kelly-frac", type="number", value=1.0, min=0.1, max=2.0, step=0.01, style=INPUT_STYLE)], width=3),
             ], className="mb-4 align-items-center"),
@@ -1376,7 +1435,16 @@ def render_tab(tab, session):
                                         html.Li("Cálculo de fracción óptima de riesgo (f de Kelly) que maximiza retornos geométricos."),
                                         html.Li("Simulaciones de Montecarlo para conocer la distribución de retornos y máximo drawdown de los distintos escenarios que se pueden dar en base a nuestras métricas operativas y, en base a eso, determinar un nivel de riesgo por posición que se adapte a nuestros objetivos.")
                                     ])
-                                ], title="4. SIMULADOR DE RIESGO")
+                                ], title="4. SIMULADOR DE RIESGO"),
+
+                                dbc.AccordionItem([
+                                    html.P("Análisis del rendimiento del portfolio en perspectiva, con el SPY como benchmark de referencia:"),
+                                    html.Ul([
+                                        html.Li("Comparar la curva de retorno acumulado del portfolio contra el SPY en distintos períodos de tiempo (YTD, por año, histórico)."),
+                                        html.Li("Evaluar métricas de retorno ajustado por riesgo: Sharpe Ratio, Sortino Ratio, Calmar Ratio, Jensen Alpha para determinar la calidad del rendimiento más allá del retorno."),
+                                        html.Li("Analizar la evolución del drawdown máximo porcentual para medir la consistencia del sistema y su capacidad de preservación de capital.")
+                                    ])
+                                ], title="5. PERFORMANCE")
                             ], start_collapsed=True, flush=True)
                         ])
                     ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "marginBottom": "20px"}),
@@ -1436,6 +1504,12 @@ def render_tab(tab, session):
                                     html.P([html.B("Fórmula:"), " (Retorno Anualizado - Tasa Libre de Riesgo) / Desviación Estándar de Retornos a la baja."]),
                                     html.P("Suele ser más representativo para traders que buscan asimetría positiva en sus retornos.")
                                 ], title="Sortino Ratio"),
+
+                                dbc.AccordionItem([
+                                    html.P([html.B("Definición:"), " Mide el retorno anualizado obtenido por cada unidad de drawdown máximo asumido. Relaciona directamente la rentabilidad con el peor escenario de pérdida experimentado."]),
+                                    html.P([html.B("Fórmula:"), " Retorno Anualizado / |Máximo Drawdown %|"]),
+                                    html.P("Un Calmar superior a 1.0 indica que el portafolio generó más retorno anualizado del que sufrió en su peor caída. Valores más altos reflejan mejor control del riesgo de ruina.")
+                                ], title="Calmar Ratio"),
 
                                 dbc.AccordionItem([
                                     html.P([html.B("Beta (β):"), " Sensibilidad del portafolio frente al mercado (SPY). Un β de 1.2 significa que el portafolio es un 20% más volátil que el SPY."]),
@@ -1632,6 +1706,14 @@ def ops_callback(n_new, list_of_contents, list_of_names, nt, ns, np, nq, nsl, nd
         return "Orden ingresada.", format_df(df_open, s.get('config', {})), no_update
         
     return no_update, no_update, no_update
+
+@app.callback(Output('sl-warning', 'style'), Input('btn-new', 'n_clicks'), State('nsl', 'value'), prevent_initial_call=True)
+def toggle_sl_warning(n, nsl):
+    if n and not nsl:
+        return {"display": "block", "color": COLOR_NEG, "fontFamily": "Consolas", "fontSize": "0.78rem",
+                "marginTop": "6px", "padding": "6px 10px", "border": f"1px solid {COLOR_NEG}",
+                "borderRadius": "4px", "backgroundColor": "rgba(246, 70, 93, 0.08)"}
+    return {"display": "none"}
 
 @app.callback([Output("management-container", "style"), Output("selected-trade-store", "data"), Output("dyn-info", "children"), Output("usl", "value")], Input("open-grid", "selectedRows"))
 def toggle(sel):
@@ -1884,11 +1966,18 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         down_std = downside.std()
         if down_std == 0: return 0
         return np.sqrt(252) * (rets.mean() - rfr_daily) / down_std
-    
+
+    def calc_calmar(rets, max_drawdown):
+        if max_drawdown == 0 or len(rets) < 2: return 0
+        ann_return = ((1 + rets).prod() ** (252 / len(rets)) - 1) * 100
+        return ann_return / abs(max_drawdown)
+
     sharpe_port = calc_sharpe(port_rets)
     sharpe_spy = calc_sharpe(spy_rets)
     sortino_port = calc_sortino(port_rets)
     sortino_spy = calc_sortino(spy_rets)
+    calmar_port = calc_calmar(port_rets, max_dd)
+    calmar_spy = calc_calmar(spy_rets, max_dd_spy)
     
     # Alpha y Beta
     try:
@@ -1922,6 +2011,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
         make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
         make_perf_card("SORTINO RATIO", f"{sortino_port:.2f}", f"SPY: {sortino_spy:.2f}", TEXT_MAIN),
+        make_perf_card("CALMAR RATIO", f"{calmar_port:.2f}", f"SPY: {calmar_spy:.2f}", TEXT_MAIN),
         make_perf_card("ALPHA (JENSEN)", f"α {alpha:+.2f}%", "Exceso vs Riesgo", COLOR_SPY),
         make_perf_card("BETA", f"β {beta:.2f}", "Sensibilidad vs SPY", TEXT_MAIN),
         make_perf_card("TIME UNDER WATER", f"{max_tuw:.0f} Max", f"{avg_tuw:.0f} Promedio (Días)", COLOR_NEG if max_tuw > 0 else TEXT_MAIN),
