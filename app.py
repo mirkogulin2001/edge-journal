@@ -952,7 +952,7 @@ def layout_dashboard(username):
             dcc.Tab(label='HISTORIAL', value='tab-history', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE), 
             dcc.Tab(label='ANALYTICS', value='tab-analytics', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='SIMULADOR DE RIESGO', value='tab-montecarlo', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
-            dcc.Tab(label='PERFORMANCE', value='tab-performance', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
+            dcc.Tab(label='', value='tab-performance', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='INFORMACIÓN Y USO', value='tab-info', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE)
         ]), 
         html.Div(id='tab-content', className="pt-4"), html.Div(id="hidden-wrapper")
@@ -1280,7 +1280,7 @@ def render_tab(tab, session):
         return dbc.Container([
             # Título
             dbc.Row([
-                dbc.Col(html.H4("📊 RETORNO ACUMULADO DEL PORTFOLIO", 
+                dbc.Col(html.H4("RETORNO ACUMULADO DEL PORTFOLIO", 
                                style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "Consolas, monospace"}))
             ]),
             
@@ -2048,6 +2048,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
+
 
 
 
