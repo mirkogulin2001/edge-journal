@@ -1529,7 +1529,12 @@ def render_tab(tab, session):
                                 dbc.AccordionItem([
                                     html.P([html.B("Definición:"), " Límite del 'peor escenario razonable' (95% de confianza) arrojado por la simulación de Montecarlo."]),
                                     html.P("Indica que en el 95% de las iteraciones simuladas, el Drawdown del sistema no superó este nivel de caída.")
-                                ], title="Value at Risk (VaR 95%)")
+                                ], title="Value at Risk (VaR 95%)"),
+                                dbc.AccordionItem([
+                                    html.P([html.B("Definición:"), " Porcentaje de escenarios simulados en los que la equity del portfolio llega a cero, es decir, pérdida total del capital."]),
+                                    html.P([html.B("Fórmula:"), " (N° de equity curves que alcanzan 0 / N° total de simulaciones) * 100"]),
+                                    html.P("Un riesgo de ruina del 1% significa que en 1 de cada 100 escenarios simulados, el operador pierde la totalidad de su capital. Es una métrica clave para evaluar si la fracción de Kelly elegida es viable en la práctica.")
+                                ], title="Riesgo de Ruina"),
 
                             ], start_collapsed=True, flush=True)
                         ])
