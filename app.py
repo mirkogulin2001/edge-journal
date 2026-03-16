@@ -532,7 +532,9 @@ def run_monte_carlo_simulation(df_closed, n_simulations, kelly_fraction, trades_
     peaks = np.maximum.accumulate(sim_curves, axis=1)
     dd = (sim_curves - peaks) / peaks
     max_dd = np.min(dd, axis=1) * 100
-
+    # Riesgo de Ruina: curvas que tocaron 0 o menos en algún momento
+    ruin_count = np.sum(np.any(sim_curves <= 0, axis=1))
+    ruin_pct = (ruin_count / n_simulations) * 100
     # Estadisticas
     mean_ret = np.mean(final_ret)
     med_ret = np.median(final_ret)
@@ -598,8 +600,8 @@ def run_monte_carlo_simulation(df_closed, n_simulations, kelly_fraction, trades_
         make_card(f"{mean_ret:.1f}%", "MEDIA RETORNO", COLOR_POS),
         make_card(f"{med_ret:.1f}%", "MEDIANA RETORNO", COLOR_POS), 
         make_card(f"{std_ret:.1f}%", "DESVIO DE RETORNOS", COLOR_NEUTRAL),
-        make_card(f"{mean_dd:.1f}%", "DD PROMEDIO", COLOR_NEG),
-        make_card(f"{p05_dd:.1f}%", "VAR 95%", "red")
+        make_card(f"{p05_dd:.1f}%", "VAR 95%", "red"),
+        make_card(f"{ruin_pct:.1f}%", "RIESGO DE RUINA", "red")
     ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
 
     return fig_ret, fig_dd, fig_eq, fig_kelly, kpis
