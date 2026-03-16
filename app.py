@@ -1395,6 +1395,19 @@ def render_tab(tab, session):
                         ])
                     ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "marginBottom": "20px"}),
                 ], width=6),
+                # --- SECCION: CONFIGURACION DE ESTRATEGIA ---
+                    dbc.Card([
+                        dbc.CardHeader("⚙️ CONFIGURACIÓN DE ESTRATEGIA", style={"fontWeight": "bold", "color": COLOR_POS}),
+                        dbc.CardBody([
+                            html.P("Edge Journal permite definir parámetros de estrategia personalizados para clasificar cada operación según el motivo por el cual fue tomada.", className="card-text"),
+                            html.P("De este modo, es posible distinguir los trades entre las distintas variantes de operatoria que uno utiliza y analizar el desempeño de cada una por separado. Por ejemplo, se puede definir un parámetro que diferencie operaciones de Trend Following, de Buy & Hold (posiciones de largo plazo basadas en análisis fundamental), de Swing Trading, o cualquier otra categoría que se considere relevante."),
+                            html.P("Esto permite responder preguntas como: ¿qué tipo de operatoria me genera más ganancias?"),
+                            dbc.Alert([
+                                html.I(className="bi bi-info-circle-fill me-2"),
+                                "Los parámetros se configuran desde el botón 'CONFIG. ESTRATEGIA' en la barra superior. Cada parámetro que definas aparecerá como filtro en la pestaña de Analytics para atribución de resultados."
+                            ], color="info", style={"backgroundColor": "rgba(0, 176, 189, 0.1)", "border": f"1px solid {COLOR_POS}", "color": TEXT_MAIN})
+                        ])
+                    ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "marginBottom": "20px"}),
 
                 dbc.Col([
                     # --- SECCION 3: GUIA DE PESTAÑAS ---
