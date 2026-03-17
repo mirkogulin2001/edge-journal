@@ -1952,8 +1952,10 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
             else:
                 col = 'Close' if 'Close' in spy_raw.columns else spy_raw.columns[0]
                 spy_series = spy_raw[col]
+            spy_series.index = pd.to_datetime(spy_series.index).normalize()
             spy_aligned = spy_series.reindex(daily_df['date']).ffill().bfill()
             daily_df['spy_price'] = spy_aligned.values
+            print(f"[PERF] SPY alineado: {len(spy_aligned)} días, precio inicio={float(spy_aligned.iloc[0]):.2f}, precio fin={float(spy_aligned.iloc[-1]):.2f}")
         else: 
             daily_df['spy_price'] = np.nan
             
