@@ -1256,7 +1256,7 @@ def render_tab(tab, session):
     elif tab == 'tab-montecarlo':
         return html.Div([
             dbc.Row([
-                dbc.Col([html.H3("Simulador de Montecarlo", className="fw-bold",style={"color": TEXT_MAIN}), html.P("Generador de escenarios estocasticos basado en distr. de R.", className="text-muted"), html.P("Se recomienda un mínimo de 50 operaciones para realizar la simulación.", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "Consolas", "marginTop": "-8px"})], width=6),
+                dbc.Col([html.H3("Simulador de Montecarlo", className="fw-bold",style={"color": TEXT_MAIN}), html.P("Generador de escenarios  basado en distr. de R.", className="text-muted"), html.P("Se recomienda un mínimo de 50/100 operaciones para realizar la simulación.", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "Consolas", "marginTop": "-8px"})], width=6),
                 dbc.Col([dbc.Label("N° Iteraciones", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-n-sim", type="number", value=3000, min=100, max=10000, style=INPUT_STYLE)], width=3),
                 dbc.Col([dbc.Label("Kelly Fraction (f*)", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-kelly-frac", type="number", value=1.0, min=0.1, max=2.0, step=0.01, style=INPUT_STYLE)], width=3),
             ], className="mb-4 align-items-center"),
