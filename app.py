@@ -2003,8 +2003,13 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     try:
         cov = np.cov(port_rets, spy_rets)
         beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 1.0
-        alpha = (port_rets.mean() - rfr_daily) - beta * (spy_rets.mean() - rfr_daily)
-        alpha *= 252 * 100
+        # Alpha sobre retornos totales del período (no anualizado)
+        port_total_ret = (daily_df['total_value'].iloc[-1] / daily_df['total_value'].iloc[0]) - 1
+        spy_total_ret = (daily_df['spy_price'].iloc[-1] / daily_df['spy_price'].iloc[0]) - 1
+        n_days = len(daily_df)
+        rfr_period = 0.04 * (n_days / 252)  # Tasa libre ajustada al período
+        alpha = (port_total_ret - rfr_period) - beta * (spy_total_ret - rfr_period)
+        alpha *= 100  # A porcentaje
     except:
         beta, alpha = 1.0, 0.0
 
