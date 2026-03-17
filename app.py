@@ -1930,20 +1930,10 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío"
         
        # --- DESCARGA DE SPY PARA BENCHMARK ---
-        # Para periodos fijos (YTD, 2025, YOY), el SPY arranca desde el inicio del periodo, no desde el primer trade
-        if period == "YTD":
-            spy_start_date = pd.Timestamp(today.year, 1, 1)
-        elif period == "2025":
-            spy_start_date = pd.Timestamp(2025, 1, 1)
-        elif period == "YOY":
-            spy_start_date = today - pd.DateOffset(years=1)
-        else:
-            spy_start_date = daily_df['date'].min()
-        
+        # SPY se mide en el mismo periodo que el portfolio
         start_date_all = daily_df['date'].min()
         end_date_all = daily_df['date'].max()
-        spy_download_start = min(spy_start_date, start_date_all)
-        spy_raw = yf.download("SPY", start=spy_download_start, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
+        spy_raw = yf.download("SPY", start=start_date_all, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
         
         if not spy_raw.empty:
             if isinstance(spy_raw.columns, pd.MultiIndex):
@@ -1974,15 +1964,10 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # --- KPIs AVANZADOS (SPY) ---
     if 'spy_price' in daily_df.columns and not daily_df['spy_price'].isnull().all():
-        # Normalizar SPY desde el inicio del periodo, no desde el primer trade
-        if period in ["YTD", "2025", "YOY"]:
-            spy_period_start = spy_start_date
-            # Buscar el precio del SPY en la fecha de inicio del periodo
-            spy_full = spy_series.reindex(pd.bdate_range(spy_start_date, end_date_all)).ffill().bfill()
-            spy_start = float(spy_full.iloc[0])
-        else:
-            spy_start = daily_df['spy_price'].iloc[0]
+        # SPY normalizado desde la misma fecha de inicio que el portfolio
+        spy_start = float(daily_df['spy_price'].iloc[0])
         daily_df['norm_spy'] = ((daily_df['spy_price'] / spy_start) - 1) * 100
+        print(f"[PERF] SPY normalizado desde ${spy_start:.2f} (fecha: {daily_df['date'].iloc[0]}) | Retorno SPY periodo: {daily_df['norm_spy'].iloc[-1]:.2f}%")
     else:
         daily_df['norm_spy'] = 0.0
 
