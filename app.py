@@ -1957,7 +1957,8 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
-    total_return = (total_end / initial_balance - 1) * 100
+    period_start_value = daily_df['total_value'].iloc[0]
+    total_return = (total_end / period_start_value - 1) * 100
     total_pnl = total_end - initial_balance
     cummax = daily_df['total_value'].cummax()
     daily_df['drawdown_pct'] = ((daily_df['total_value'] - cummax) / cummax) * 100
