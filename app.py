@@ -1551,7 +1551,7 @@ def render_tab(tab, session):
                         html.A("Edge Terminal", href="https://edge-terminal.streamlit.app/", target="_blank", style={"color": COLOR_POS, "textDecoration": "none", "fontWeight": "bold"}),
                         " y mejorá tus análisis"
                     ], style={"textAlign": "center", "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "color": TEXT_MAIN, "marginBottom": "10px"}),
-                    html.P("© 2026 Edge Terminal", style={"color": BORDER_COLOR, "fontSize": "0.75rem", "fontFamily": "Consolas, monospace", "textAlign": "center", "marginBottom": "0"})
+                    html.P("© 2026 Edge Journal", style={"color": BORDER_COLOR, "fontSize": "0.75rem", "fontFamily": "Consolas, monospace", "textAlign": "center", "marginBottom": "0"})
                 ], style={"padding": "20px 0 30px 0"}), width=12)
             ])
         ])
