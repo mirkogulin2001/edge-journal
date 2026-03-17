@@ -2010,13 +2010,14 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     try:
         cov = np.cov(port_rets, spy_rets)
         beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 1.0
-        # Alpha sobre retornos totales del período (no anualizado)
-        port_total_ret = (daily_df['total_value'].iloc[-1] / daily_df['total_value'].iloc[0]) - 1
-        spy_total_ret = (daily_df['spy_price'].iloc[-1] / daily_df['spy_price'].iloc[0]) - 1
+        # Alpha sobre retornos del período usando las mismas métricas que las tarjetas
+        port_total_ret = total_return / 100  # Ya calculado arriba como (total_end / initial_balance - 1) * 100
+        spy_total_ret = total_return_spy / 100  # Ya calculado arriba desde norm_spy
         n_days = len(daily_df)
-        rfr_period = 0.04 * (n_days / 252)  # Tasa libre ajustada al período
+        rfr_period = 0.04 * (n_days / 252)
         alpha = (port_total_ret - rfr_period) - beta * (spy_total_ret - rfr_period)
-        alpha *= 100  # A porcentaje
+        alpha *= 100
+        print(f"[PERF] Alpha calc: port={port_total_ret*100:.2f}%, spy={spy_total_ret*100:.2f}%, beta={beta:.2f}, rf={rfr_period*100:.2f}%, alpha={alpha:.2f}%")
     except:
         beta, alpha = 1.0, 0.0
 
