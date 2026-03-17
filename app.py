@@ -1356,7 +1356,7 @@ def render_tab(tab, session):
                     
                     # --- SECCION 1: OBJETIVOS ---
                     dbc.Card([
-                        dbc.CardHeader("🎯 OBJETIVO DEL SITIO", style={"fontWeight": "bold", "color": TEXT_MAIN}),
+                        dbc.CardHeader("OBJETIVO DEL SITIO", style={"fontWeight": "bold", "color": TEXT_MAIN}),
                         dbc.CardBody([
                             html.P("Edge Journal es una plataforma de registro y análisis de operatoria bursátil diseñada para:", className="card-text"),
                             html.Ul([
@@ -1369,7 +1369,7 @@ def render_tab(tab, session):
 
                     # --- SECCION 2: FORMATO EXCEL ---
                     dbc.Card([
-                        dbc.CardHeader("📂 IMPORTACIÓN DE EXCEL (FORMATO REQUERIDO)", style={"fontWeight": "bold", "color": COLOR_POS}),
+                        dbc.CardHeader("IMPORTACIÓN DE EXCEL (FORMATO REQUERIDO)", style={"fontWeight": "bold", "color": COLOR_POS}),
                         dbc.CardBody([
                             html.P("Si se desea importar un historial de operaciones, tu archivo (.csv o .xlsx) debe contener las siguientes columnas (no importa el orden):", className="card-text"),
                             
@@ -1399,7 +1399,7 @@ def render_tab(tab, session):
                 dbc.Col([
                     # --- SECCION 3: GUIA DE PESTAÑAS ---
                     dbc.Card([
-                        dbc.CardHeader("🧭 GUÍA DE NAVEGACIÓN", style={"fontWeight": "bold", "color": TEXT_MAIN}),
+                        dbc.CardHeader("GUÍA DE NAVEGACIÓN", style={"fontWeight": "bold", "color": TEXT_MAIN}),
                         dbc.CardBody([
                             dbc.Accordion([
                                 dbc.AccordionItem([
@@ -1453,7 +1453,7 @@ def render_tab(tab, session):
 
                     # --- SECCION 4: GLOSARIO ---
                     dbc.Card([
-                        dbc.CardHeader("📚 GLOSARIO Y FÓRMULAS", style={"fontWeight": "bold", "color": COLOR_NEUTRAL}),
+                        dbc.CardHeader("GLOSARIO Y FÓRMULAS", style={"fontWeight": "bold", "color": COLOR_NEUTRAL}),
                         dbc.CardBody([
                             dbc.Accordion([
                                 dbc.AccordionItem([
