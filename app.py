@@ -1928,7 +1928,9 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         elif period == "YOY":
             daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
         if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío"
-        
+        # Recalcular retorno acumulado desde el inicio del periodo (arranca en 0%)
+        period_start_value = daily_df['total_value'].iloc[0]
+        daily_df['cumulative_return'] = (daily_df['total_value'] / period_start_value) - 1
        # --- DESCARGA DE SPY PARA BENCHMARK ---
         # SPY se mide en el mismo periodo que el portfolio
         start_date_all = daily_df['date'].min()
