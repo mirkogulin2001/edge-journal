@@ -1972,7 +1972,14 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # --- KPIs AVANZADOS (SPY) ---
     if 'spy_price' in daily_df.columns and not daily_df['spy_price'].isnull().all():
-        spy_start = daily_df['spy_price'].iloc[0]
+        # Normalizar SPY desde el inicio del periodo, no desde el primer trade
+        if period in ["YTD", "2025", "YOY"]:
+            spy_period_start = spy_start_date
+            # Buscar el precio del SPY en la fecha de inicio del periodo
+            spy_full = spy_series.reindex(pd.bdate_range(spy_start_date, end_date_all)).ffill().bfill()
+            spy_start = float(spy_full.iloc[0])
+        else:
+            spy_start = daily_df['spy_price'].iloc[0]
         daily_df['norm_spy'] = ((daily_df['spy_price'] / spy_start) - 1) * 100
     else:
         daily_df['norm_spy'] = 0.0
