@@ -1929,10 +1929,21 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
             daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
         if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío"
         
-        # --- DESCARGA DE SPY PARA BENCHMARK ---
+       # --- DESCARGA DE SPY PARA BENCHMARK ---
+        # Para periodos fijos (YTD, 2025, YOY), el SPY arranca desde el inicio del periodo, no desde el primer trade
+        if period == "YTD":
+            spy_start_date = pd.Timestamp(today.year, 1, 1)
+        elif period == "2025":
+            spy_start_date = pd.Timestamp(2025, 1, 1)
+        elif period == "YOY":
+            spy_start_date = today - pd.DateOffset(years=1)
+        else:
+            spy_start_date = daily_df['date'].min()
+        
         start_date_all = daily_df['date'].min()
         end_date_all = daily_df['date'].max()
-        spy_raw = yf.download("SPY", start=start_date_all, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
+        spy_download_start = min(spy_start_date, start_date_all)
+        spy_raw = yf.download("SPY", start=spy_download_start, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
         
         if not spy_raw.empty:
             if isinstance(spy_raw.columns, pd.MultiIndex):
