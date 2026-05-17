@@ -247,7 +247,7 @@ def build_daily_portfolio(df_closed, initial_balance, df_open=None):
             tickers=tickers,
             start=start_date,
             end=end_date + timedelta(days=1),
-            auto_adjust=True,
+            auto_adjust=False,
             progress=False
         )
         
