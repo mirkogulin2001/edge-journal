@@ -900,9 +900,10 @@ def get_management_panel():
                     
                     dbc.Tab(label="TOMA PARCIAL", children=[
                         dbc.Row([
-                            dbc.Col(dbc.Input(id="pq", placeholder="Cantidad", type="number", style=INPUT_STYLE), width=6), 
-                            dbc.Col(dbc.Input(id="pp", placeholder="Precio Salida", type="number", style=INPUT_STYLE), width=6)
-                        ], className="my-3"), 
+                            dbc.Col(dbc.Input(id="pq", placeholder="Cantidad", type="number", style=INPUT_STYLE), width=4),
+                            dbc.Col(dbc.Input(id="pp", placeholder="Precio Salida", type="number", style=INPUT_STYLE), width=4),
+                            dbc.Col(dbc.Input(id="pd", type="date", value=date.today(), style=INPUT_STYLE), width=4)
+                        ], className="my-3"),
                         dbc.Button("EJECUTAR PARCIAL", id="btn-part", color="light", className="w-100 fw-bold text-dark", style={"border": "none", "fontFamily": "Consolas"})
                     ], style=TAB_STYLE, tab_style=TAB_STYLE, active_tab_style=TAB_SELECTED_STYLE), 
                     
@@ -1739,8 +1740,8 @@ def toggle_sl_warning(n, nsl):
 def toggle(sel):
     return ({'display': 'block'}, sel[0], f"SELECCION: {sel[0]['symbol']}", sel[0]['current_stop_loss']) if sel else ({'display': 'none'}, None, "", "")
 
-@app.callback([Output('g-msg', 'children', allow_duplicate=True), Output('open-grid', 'rowData', allow_duplicate=True), Output("management-container", "style", allow_duplicate=True), Output("open-grid", "selectedRows")], [Input('btn-close', 'n_clicks'), Input('btn-part', 'n_clicks'), Input('btn-sl', 'n_clicks'), Input('btn-del', 'n_clicks'), Input('confirm-del-all-open', 'submit_n_clicks')], [State('selected-trade-store', 'data'), State('cp', 'value'), State('cd', 'value'), State('cr', 'value'), State('pq', 'value'), State('pp', 'value'), State('usl', 'value'), State('c-notes', 'value'), State('session-store', 'data')], prevent_initial_call=True)
-def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
+@app.callback([Output('g-msg', 'children', allow_duplicate=True), Output('open-grid', 'rowData', allow_duplicate=True), Output("management-container", "style", allow_duplicate=True), Output("open-grid", "selectedRows")], [Input('btn-close', 'n_clicks'), Input('btn-part', 'n_clicks'), Input('btn-sl', 'n_clicks'), Input('btn-del', 'n_clicks'), Input('confirm-del-all-open', 'submit_n_clicks')], [State('selected-trade-store', 'data'), State('cp', 'value'), State('cd', 'value'), State('cr', 'value'), State('pq', 'value'), State('pp', 'value'), State('pd', 'value'), State('usl', 'value'), State('c-notes', 'value'), State('session-store', 'data')], prevent_initial_call=True)
+def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, p_date, usl, c_notes, s):
     if not s: return no_update, no_update, no_update, no_update
     cid = ctx.triggered_id
     
@@ -1758,7 +1759,7 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, usl, c_notes, s):
     if cid == 'btn-close': 
         # AQUI USAMOS LA NUEVA FUNCION DE DB QUE ACEPTA NOTAS DE SALIDA
         db.close_trade_total(tid, cp, cd, cr, str(c_notes) if c_notes else "")
-    elif cid == 'btn-part': db.close_partial(tid, pq, pp, date.today())
+    elif cid == 'btn-part': db.close_partial(tid, pq, pp, p_date or date.today())
     elif cid == 'btn-sl': db.update_stop_loss(tid, usl)
     elif cid == 'btn-del': db.delete_trade(tid)
     
@@ -2082,7 +2083,6 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
 # ═══════════════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
     app.run(debug=True)
-
 
 
 
