@@ -133,31 +133,6 @@ def format_df(df, user_config):
                 df[param] = df['tags'].apply(lambda x: (x or {}).get(param, "-"))
     return df.to_dict("records")
 
-def build_capital_kpis(df_cap):
-    """Arma las tarjetas KPI de la pestaña CAPITAL a partir de los movimientos (aportes/retiros)."""
-    def make_cap_card(val, label, color=None):
-        val_s = KPI_VAL_STYLE.copy()
-        if color: val_s['color'] = color
-        return dbc.Col(html.Div([html.P(val, style=val_s), html.P(label, style=KPI_LBL_STYLE)], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
-
-    if df_cap is not None and not df_cap.empty:
-        amounts = pd.to_numeric(df_cap['amount'], errors='coerce').fillna(0)
-        total_aportado = amounts[df_cap['flow_type'] == 'APORTE'].sum()
-        total_retirado = amounts[df_cap['flow_type'] == 'RETIRO'].sum()
-        capital_inicial_val = float(amounts.iloc[0])
-        capital_inicial_fecha = df_cap.iloc[0]['flow_date']
-        capital_neto = total_aportado - total_retirado
-    else:
-        total_aportado = total_retirado = capital_inicial_val = capital_neto = 0.0
-        capital_inicial_fecha = "-"
-
-    return html.Div(dbc.Row([
-        make_cap_card(f"${capital_inicial_val:,.0f}", f"CAPITAL INICIAL ({capital_inicial_fecha})", COLOR_POS),
-        make_cap_card(f"${total_aportado:,.0f}", "TOTAL APORTADO", COLOR_POS),
-        make_cap_card(f"${total_retirado:,.0f}", "TOTAL RETIRADO", COLOR_NEG),
-        make_cap_card(f"${capital_neto:,.0f}", "CAPITAL NETO", TEXT_MAIN),
-    ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
-
 def calculate_live_metrics(df_open):
     if df_open.empty: return df_open
     df_open['current_price'] = df_open['entry_price']
@@ -225,30 +200,20 @@ def safe_float(val):
         elif ',' in s: s = s.replace(',', '.')
         return float(s)
     except: return 0.0
-def build_daily_portfolio(df_closed, df_capital_flows, df_open=None):
+def build_daily_portfolio(df_closed, initial_balance, df_open=None):
     """
-    Calcula el valor diario del portfolio basado en trades históricos y movimientos de capital.
+    Calcula el valor diario del portfolio basado en trades históricos.
     Descarga precios diarios vía yfinance para posiciones abiertas en cada día.
 
     Args:
         df_closed: DataFrame con trades cerrados (columnas: symbol, entry_date, exit_date,
                    entry_price, exit_price, quantity, side)
-        df_capital_flows: DataFrame con columnas flow_date y amount (amount ya firmado:
-                   positivo = aporte, negativo = retiro)
+        initial_balance: Capital inicial del portfolio
         df_open: DataFrame con trades abiertos (opcional). Se incluyen desde entry_date hasta hoy.
 
     Returns:
-        DataFrame con: date, total_value, cash, equity_value, external_cf, cumulative_return, daily_return
-        El retorno se calcula con el método Time-Weighted Return (TWR): cada día se ajusta
-        restando el flujo de capital externo de ese día antes de calcular el % de cambio,
-        y los retornos diarios se encadenan geométricamente.
+        DataFrame con: date, total_value, cumulative_return, daily_return
     """
-    empty_result = pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return', 'external_cf'])
-
-    cap = df_capital_flows.copy() if df_capital_flows is not None else pd.DataFrame()
-    if not cap.empty:
-        cap['flow_date'] = pd.to_datetime(cap['flow_date']).dt.normalize()
-
     # Combinar trades cerrados y abiertos
     df_parts = []
     if not df_closed.empty:
@@ -262,76 +227,63 @@ def build_daily_portfolio(df_closed, df_capital_flows, df_open=None):
         df_o['exit_date'] = pd.NaT
         df_o['exit_price'] = np.nan
         df_parts.append(df_o)
-    if not df_parts and cap.empty:
-        return empty_result
-    df = pd.concat(df_parts, ignore_index=True) if df_parts else pd.DataFrame(
-        columns=['symbol', 'side', 'entry_date', 'exit_date', 'entry_price', 'exit_price', 'quantity']
-    )
-
-    # Rango de fechas (considera trades y movimientos de capital)
-    candidate_starts = []
-    if not df.empty: candidate_starts.append(df['entry_date'].min())
-    if not cap.empty: candidate_starts.append(cap['flow_date'].min())
-    if not candidate_starts:
-        return empty_result
-    start_date = min(candidate_starts).date()
-
-    candidate_ends = [date.today()]
-    if not df.empty and df['exit_date'].notna().any(): candidate_ends.append(df['exit_date'].max().date())
-    if not cap.empty: candidate_ends.append(cap['flow_date'].max().date())
-    end_date = max(candidate_ends)
-
+    if not df_parts:
+        return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return'])
+    df = pd.concat(df_parts, ignore_index=True)
+    
+    # Rango de fechas
+    start_date = df['entry_date'].min().date()
+    end_date = df['exit_date'].max().date()
+    if pd.isna(end_date) or end_date < date.today():
+        end_date = date.today()
+    
     # Descargar precios históricos de todos los tickers
-    tickers = list(df['symbol'].unique()) if not df.empty else []
-    if tickers:
-        try:
-            print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers: {tickers}")
-            print(f"[PERFORMANCE] Rango de fechas: {start_date} → {end_date}")
-
-            prices_raw = yf.download(
-                tickers=tickers,
-                start=start_date,
-                end=end_date + timedelta(days=1),
-                auto_adjust=False,
-                progress=False
-            )
-
-            print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
-
-            # Formatear precios: siempre producir columnas simples {ticker: precio_cierre}
-            # yfinance puede retornar MultiIndex (Price, Ticker) o columnas simples según versión
-            if isinstance(prices_raw.columns, pd.MultiIndex):
-                prices = prices_raw["Close"]  # DataFrame con tickers como columnas simples
-                if isinstance(prices, pd.Series):
-                    prices = prices.to_frame(name=tickers[0])
-            elif len(tickers) == 1:
-                prices = prices_raw[["Close"]].rename(columns={"Close": tickers[0]})
-            else:
-                prices = prices_raw["Close"]
-
-            prices.index = pd.to_datetime(prices.index).normalize()
-            print(f"[PERFORMANCE] Precios formateados correctamente. {len(prices)} días descargados.")
-            # FIX: Rango continuo de business days para eliminar saltos
-            full_bdays = pd.bdate_range(start=start_date, end=end_date)
-            prices = prices.reindex(full_bdays).ffill().bfill()
-        except Exception as e:
-            print(f"[PERFORMANCE] ❌ ERROR descargando precios: {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
-            raise Exception(f"No se pudieron descargar precios de Yahoo Finance. Verificá tu conexión a internet. Error: {str(e)}")
-    else:
+    tickers = list(df['symbol'].unique())
+    try:
+        print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers: {tickers}")
+        print(f"[PERFORMANCE] Rango de fechas: {start_date} → {end_date}")
+        
+        prices_raw = yf.download(
+            tickers=tickers,
+            start=start_date,
+            end=end_date + timedelta(days=1),
+            auto_adjust=False,
+            progress=False
+        )
+        
+        print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
+        
+        # Formatear precios: siempre producir columnas simples {ticker: precio_cierre}
+        # yfinance puede retornar MultiIndex (Price, Ticker) o columnas simples según versión
+        if isinstance(prices_raw.columns, pd.MultiIndex):
+            prices = prices_raw["Close"]  # DataFrame con tickers como columnas simples
+            if isinstance(prices, pd.Series):
+                prices = prices.to_frame(name=tickers[0])
+        elif len(tickers) == 1:
+            prices = prices_raw[["Close"]].rename(columns={"Close": tickers[0]})
+        else:
+            prices = prices_raw["Close"]
+        
+        prices.index = pd.to_datetime(prices.index).normalize()
+        print(f"[PERFORMANCE] Precios formateados correctamente. {len(prices)} días descargados.")
+        # FIX: Rango continuo de business days para eliminar saltos
         full_bdays = pd.bdate_range(start=start_date, end=end_date)
-        prices = pd.DataFrame(index=full_bdays)
-
+        prices = prices.reindex(full_bdays).ffill().bfill()
+    except Exception as e:
+        print(f"[PERFORMANCE] ❌ ERROR descargando precios: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise Exception(f"No se pudieron descargar precios de Yahoo Finance. Verificá tu conexión a internet. Error: {str(e)}")
+    
     # Calcular cash flows en cada fecha
-    # --- LÓGICA DE CASH FLOW INSTITUCIONAL (LONG / SHORT) - TRADES ---
+    # --- LÓGICA DE CASH FLOW INSTITUCIONAL (LONG / SHORT) ---
     cash_flows = {}
     for _, trade in df.iterrows():
         entry = trade['entry_date']
         cost = trade['quantity'] * trade['entry_price']
         exit_d = trade['exit_date']
         revenue = trade['quantity'] * trade['exit_price'] if pd.notna(exit_d) else 0
-
+        
         if trade['side'] == 'LONG':
             # LONG: Pago al entrar, cobro al salir
             cash_flows[entry] = cash_flows.get(entry, 0) - cost
@@ -343,28 +295,21 @@ def build_daily_portfolio(df_closed, df_capital_flows, df_open=None):
             if pd.notna(exit_d):
                 cash_flows[exit_d] = cash_flows.get(exit_d, 0) - revenue
 
-    # --- CASH FLOWS EXTERNOS (APORTES / RETIROS) ---
-    capital_cf = {}
-    for _, row in cap.iterrows():
-        d = row['flow_date']
-        capital_cf[d] = capital_cf.get(d, 0) + float(row['amount'])
-
     all_dates = prices.index
     daily_values = []
-    cash = 0.0
-
+    cash = initial_balance
+    
     for day in all_dates:
-        ext_cf_today = capital_cf.get(day, 0)
-        # Sumamos/Restamos el flujo de caja del día (trades + aportes/retiros)
-        cash += cash_flows.get(day, 0) + ext_cf_today
-
+        # Sumamos/Restamos el flujo de caja del día
+        cash += cash_flows.get(day, 0)
+        
         # Posiciones abiertas (Liability en caso de Shorts)
         open_trades = df[(df['entry_date'] <= day) & ((df['exit_date'].isna()) | (df['exit_date'] > day))]
         equity = 0.0
-
+        
         for _, trade in open_trades.iterrows():
             ticker = trade['symbol']
-
+            
             # Obtener precio actual o usar el de entrada como fallback
             # Usamos .at para garantizar acceso escalar (evita Series con MultiIndex)
             if ticker in prices.columns:
@@ -373,28 +318,21 @@ def build_daily_portfolio(df_closed, df_capital_flows, df_open=None):
                     price = trade['entry_price']
             else:
                 price = trade['entry_price']
-
-            if trade['side'] == 'LONG':
+                
+            if trade['side'] == 'LONG': 
                 equity += trade['quantity'] * price
-            else:
+            else: 
                 # SHORT: El valor de la posición es un pasivo (lo que cuesta recomprar)
                 equity -= trade['quantity'] * price
-
+                
         # Total = Efectivo en cuenta + Valor de las inversiones (o - deudas short)
         total = cash + equity
-        daily_values.append({'date': day, 'total_value': total, 'cash': cash, 'equity_value': equity, 'external_cf': ext_cf_today})
+        daily_values.append({'date': day, 'total_value': total, 'cash': cash, 'equity_value': equity})
 
     result = pd.DataFrame(daily_values)
-
-    # --- TIME-WEIGHTED RETURN (método Schwab) ---
-    # r_t = (V_t - CF_t) / V_(t-1) - 1 ; retorno acumulado = prod(1 + r_t) - 1
-    result['daily_return'] = 0.0
-    for i in range(1, len(result)):
-        prev_val = result.loc[i - 1, 'total_value']
-        if prev_val != 0:
-            result.loc[i, 'daily_return'] = (result.loc[i, 'total_value'] - result.loc[i, 'external_cf']) / prev_val - 1
-    result['cumulative_return'] = (1 + result['daily_return']).cumprod() - 1
-
+    result['daily_return'] = result['total_value'].pct_change().fillna(0)
+    result['cumulative_return'] = (result['total_value'] / initial_balance - 1)
+    
     return result
 
 def parse_contents(contents, filename, username):
@@ -1018,7 +956,6 @@ def layout_dashboard(username):
             dcc.Tab(label='ANALYTICS', value='tab-analytics', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='SIMULADOR DE RIESGO', value='tab-montecarlo', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='PERFORMANCE', value='tab-performance', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
-            dcc.Tab(label='CAPITAL', value='tab-capital', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='INFORMACIÓN Y USO', value='tab-info', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE)
         ]), 
         html.Div(id='tab-content', className="pt-4"), html.Div(id="hidden-wrapper")
@@ -1060,12 +997,6 @@ app.validation_layout = html.Div([
     html.Button(id="btn-perf-all"),
     html.Button(id="btn-perf-2025"),
     html.Div(id="login-msg"),
-    # Componentes de Capital (Aportes/Retiros)
-    dag.AgGrid(id="capital-grid"),
-    html.Div(id="cap-kpi-container"),
-    html.Div(id="cap-msg"),
-    html.Button(id="btn-cap-add"),
-    html.Button(id="btn-del-sel-cap"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1180,10 +1111,24 @@ def config_modal(n1, n2, n3, n4, is_open, rows, session):
                     opts_list = [x.strip() for x in opts_str.split(",") if x.strip()]
                     new_conf[param] = opts_list
         
+        if 'initial_balance' in session.get('config', {}): 
+            new_conf['initial_balance'] = session['config']['initial_balance']
+            
         db.update_user_config(session['user'], new_conf)
         session['config'] = new_conf
         return False, no_update, session, ""
     return False, no_update, no_update, ""
+
+@app.callback(Output('session-store', 'data', allow_duplicate=True), [Input('initial-balance-input', 'value')], [State('session-store', 'data')], prevent_initial_call=True)
+def save_balance_change(bal, session):
+    if not session or bal is None: return no_update
+    if 'config' not in session: session['config'] = {}
+    current_bal = session['config'].get('initial_balance', 10000)
+    if float(bal) != current_bal:
+        session['config']['initial_balance'] = float(bal)
+        db.update_user_config(session['user'], session['config'])
+        return session
+    return no_update
 
 @app.callback(Output('tab-content', 'children'), [Input('tabs', 'value'), Input('session-store', 'data')])
 def render_tab(tab, session):
@@ -1277,17 +1222,12 @@ def render_tab(tab, session):
     elif tab == 'tab-analytics':
         strategy_options = [{"label": k, "value": k} for k in conf.keys() if k != 'initial_balance'] if isinstance(conf, dict) else []
         default_val = strategy_options[0]['value'] if strategy_options else None
-        df_cap_analytics = db.get_capital_flows(user)
-        saved_bal = float(df_cap_analytics.iloc[0]['amount']) if not df_cap_analytics.empty else 0.0
-
+        saved_bal = conf.get('initial_balance', 10000)
+        
         return html.Div([
             dbc.Row([
-                dbc.Col(html.H3("METRICAS DE SISTEMA", className="fw-bold", style={"color": TEXT_MAIN}), width=9),
-                dbc.Col(html.Div([
-                    html.Span("CAPITAL INICIAL: ", style={"color": COLOR_NEUTRAL, "fontWeight": "bold", "fontFamily": "Consolas", "fontSize": "12px"}),
-                    html.Span(f"${saved_bal:,.0f}", style={"color": TEXT_MAIN, "fontWeight": "bold", "fontFamily": "Consolas", "fontSize": "14px"}),
-                    html.Span(" (pestaña CAPITAL)", style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "fontFamily": "Consolas", "marginLeft": "5px"})
-                ], style={"paddingTop": "6px", "textAlign": "right"}), width=3)
+                dbc.Col(html.H3("METRICAS DE SISTEMA", className="fw-bold", style={"color": TEXT_MAIN}), width=9), 
+                dbc.Col(dbc.InputGroup([dbc.InputGroupText("CAPITAL INICIAL", style={"backgroundColor": BORDER_COLOR, "color": COLOR_NEUTRAL, "border": "none", "fontWeight": "bold", "fontFamily": "Consolas", "fontSize": "12px"}), dbc.Input(id="initial-balance-input", type="number", value=saved_bal, debounce=True, style=INPUT_STYLE)]), width=3)
             ], className="mb-4 align-items-center"),
             dcc.Loading(id="loading-analytics", type="default", color=COLOR_NEUTRAL, children=html.Div([
                 html.Div(id="kpi-container", className="mb-4"),
@@ -1337,9 +1277,8 @@ def render_tab(tab, session):
         ])
     
     elif tab == 'tab-performance':
-        # Leer capital inicial de los movimientos de capital (primer aporte histórico)
-        df_cap_perf = db.get_capital_flows(user)
-        saved_bal = float(df_cap_perf.iloc[0]['amount']) if not df_cap_perf.empty else 0.0
+        # Leer capital inicial de la config (mismo que Analytics)
+        saved_bal = conf.get('initial_balance', 10000)
         
         return dbc.Container([
             # Título
@@ -1368,7 +1307,7 @@ def render_tab(tab, session):
                     html.Div([
                         html.Span("Capital Inicial: ", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace"}),
                         html.Span(f"${saved_bal:,.0f}", style={"color": TEXT_MAIN, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "fontWeight": "bold"}),
-                        html.Span(" (pestaña CAPITAL)", style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "fontFamily": "Consolas, monospace", "marginLeft": "5px"}),
+                        html.Span(" (config Analytics)", style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "fontFamily": "Consolas, monospace", "marginLeft": "5px"}),
                     ], style={"paddingTop": "25px"})
                 ], width=3),
                 
@@ -1409,48 +1348,7 @@ def render_tab(tab, session):
             ], style={"marginTop": "10px"})
             
         ], fluid=True, style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "padding": "20px"})
-
-    elif tab == 'tab-capital':
-        df_cap = db.get_capital_flows(user)
-        cap_rows = df_cap.to_dict('records') if not df_cap.empty else []
-
-        cap_cols = [
-            {"field": "id", "checkboxSelection": True, "width": 50},
-            {"field": "flow_date", "headerName": "Fecha", "width": 120},
-            {"field": "flow_type", "headerName": "Tipo", "width": 100, "cellStyle": {"styleConditions": [{"condition": "params.value=='APORTE'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='RETIRO'", "style": {"color": COLOR_NEG}}]}},
-            {"field": "amount", "headerName": "Monto", "width": 120}
-        ]
-
-        return html.Div([
-            dbc.Row([
-                dbc.Col([
-                    html.H3("CAPITAL: APORTES Y RETIROS", className="fw-bold", style={"color": TEXT_MAIN}),
-                    html.P("El movimiento más antiguo se considera el Capital Inicial. La pestaña PERFORMANCE usa estos movimientos para calcular el retorno ajustado por Time-Weighted Return (TWR, mismo criterio que usa Schwab): cada aporte o retiro se excluye del cálculo para medir sólo el desempeño de tu operatoria, no el efecto de mover dinero hacia adentro o afuera de la cuenta.", style={"color": COLOR_NEUTRAL, "fontSize": "0.82rem", "fontFamily": "Consolas", "maxWidth": "800px"})
-                ], width=12)
-            ], className="mb-3"),
-
-            dbc.Card([
-                dbc.CardHeader("NUEVO MOVIMIENTO", style={"backgroundColor": "transparent", "borderBottom": f"1px solid {BORDER_COLOR}", "fontWeight": "bold", "color": TEXT_MAIN}),
-                dbc.CardBody([
-                    dbc.Row([
-                        dbc.Col(dbc.Input(id="cap-date", type="date", value=date.today(), style=INPUT_STYLE), width=3),
-                        dbc.Col(dbc.Input(id="cap-amount", placeholder="Monto", type="number", style=INPUT_STYLE), width=3),
-                        dbc.Col(dbc.Select(id="cap-type", options=[{"label": "APORTE", "value": "APORTE"}, {"label": "RETIRO", "value": "RETIRO"}], value="APORTE", style=INPUT_STYLE), width=3),
-                        dbc.Col(dbc.Button("AGREGAR MOVIMIENTO", id="btn-cap-add", color="light", className="w-100 fw-bold text-dark", style={"border": "none", "fontFamily": "Consolas"}), width=3)
-                    ])
-                ])
-            ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "marginBottom": "20px"}),
-
-            html.Div(id="cap-kpi-container", className="mb-4", children=build_capital_kpis(df_cap)),
-
-            dbc.Row([
-                dbc.Col(dbc.Button("BORRAR SELECCION", id="btn-del-sel-cap", color="dark", className="me-2 fw-bold", style={"border": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), width="auto"),
-                dbc.Col(html.Div(id="cap-msg", className="small mt-2 fw-bold", style={"color": TEXT_MAIN}), width="auto")
-            ], className="mb-3 align-items-center"),
-
-            html.Div(dag.AgGrid(id="capital-grid", rowData=cap_rows, columnDefs=cap_cols, dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 25}, className="ag-theme-alpine-dark", style={"height": "450px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"})
-        ])
-
+    
     elif tab == 'tab-info':
         return html.Div([
             dbc.Row([
@@ -1684,44 +1582,16 @@ def manage_history(n_sel, n_all, selected, session):
         return no_update, "Error BD."
     return no_update, ""
 
-# --- CALLBACKS GESTIÓN CAPITAL (APORTES/RETIROS) ---
-@app.callback(
-    [Output('capital-grid', 'rowData'), Output('cap-msg', 'children'), Output('cap-kpi-container', 'children')],
-    [Input('btn-cap-add', 'n_clicks'), Input('btn-del-sel-cap', 'n_clicks')],
-    [State('cap-date', 'value'), State('cap-amount', 'value'), State('cap-type', 'value'),
-     State('capital-grid', 'selectedRows'), State('session-store', 'data')],
-    prevent_initial_call=True
-)
-def manage_capital(n_add, n_del, cap_date, cap_amount, cap_type, selected, session):
-    if not session: return no_update, "", no_update
-    user = session['user']
-    ctx_id = ctx.triggered_id
-
-    if ctx_id == 'btn-cap-add':
-        if not cap_date or not cap_amount:
-            return no_update, "Completá fecha y monto.", no_update
-        db.add_capital_flow(user, cap_date, abs(float(cap_amount)), cap_type or 'APORTE')
-        msg = "Movimiento agregado."
-    elif ctx_id == 'btn-del-sel-cap':
-        if not selected: return no_update, "Selección requerida.", no_update
-        db.delete_capital_flow(selected[0]['id'])
-        msg = "Movimiento eliminado."
-    else:
-        return no_update, no_update, no_update
-
-    df_cap = db.get_capital_flows(user)
-    rows = df_cap.to_dict('records') if not df_cap.empty else []
-    return rows, msg, build_capital_kpis(df_cap)
-
 # --- CALLBACKS ANALYTICS ---
-@app.callback([Output("fig-equity", "figure"), Output("fig-dd", "figure"), Output("fig-portfolio", "figure"), Output("fig-edge", "figure"), Output("fig-hist", "figure"), Output("kpi-container", "children"), Output("fig-strategy", "figure"), Output("fig-count", "figure"), Output("fig-evo-winrate", "figure"), Output("fig-evo-ratio", "figure")], [Input("strategy-selector", "value"), Input("session-store", "data")])
-def update_analytics(selected_metric, session):
-    if not session:
+@app.callback([Output("fig-equity", "figure"), Output("fig-dd", "figure"), Output("fig-portfolio", "figure"), Output("fig-edge", "figure"), Output("fig-hist", "figure"), Output("kpi-container", "children"), Output("fig-strategy", "figure"), Output("fig-count", "figure"), Output("fig-evo-winrate", "figure"), Output("fig-evo-ratio", "figure")], [Input("initial-balance-input", "value"), Input("strategy-selector", "value"), Input("session-store", "data")])
+def update_analytics(start_bal, selected_metric, session):
+    if not session: 
         return {}, {}, {}, {}, {}, [], {}, {}, {}, {}
-
-    df_cap = db.get_capital_flows(session['user'])
-    capital_final = float(df_cap.iloc[0]['amount']) if not df_cap.empty else 0.0
-
+    try:
+        capital_final = float(start_bal[0] if isinstance(start_bal, list) else start_bal)
+    except:
+        capital_final = 10000.0
+        
     df_closed = db.get_closed_trades(session['user'])
     df_open = db.get_open_trades(session['user'])
     return get_analytics_figures(df_closed, df_open, capital_final, session.get('config', {}), selected_metric)
@@ -1947,22 +1817,21 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         return empty_fig, empty_fig, [], "⚠️ Sin sesión"
     
     user = session['user']
-
-    # ── MOVIMIENTOS DE CAPITAL (APORTES/RETIROS) ──
-    df_cap_all = db.get_capital_flows(user)
-    if df_cap_all.empty:
-        return empty_fig, empty_fig, [], "⚠️ Registrá tu Capital Inicial en la pestaña CAPITAL"
-
-    df_cap_all['amount'] = pd.to_numeric(df_cap_all['amount'], errors='coerce').fillna(0)
-    df_cap_all['signed_amount'] = np.where(df_cap_all['flow_type'] == 'RETIRO', -df_cap_all['amount'], df_cap_all['amount'])
-    df_cap_all['flow_date_dt'] = pd.to_datetime(df_cap_all['flow_date'])
-    capital_inicial = float(df_cap_all.iloc[0]['amount'])
-    # Se pasa el historial completo de capital (no filtrado por periodo) para que el
-    # saldo de caja/equity se reconstruya correctamente; el recorte al periodo se hace después.
-    df_cap_for_build = pd.DataFrame({'flow_date': df_cap_all['flow_date'], 'amount': df_cap_all['signed_amount']})
-
+    
+    # Leer capital inicial de la config (mismo que Analytics)
+    conf = session.get('config', {})
+    initial_balance = conf.get('initial_balance', 10000)
+    
+    try:
+        initial_balance = float(initial_balance)
+    except:
+        initial_balance = 10000.0
+    
+    if initial_balance <= 0:
+        return empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics"
+    
     # ── CACHE CHECK ──
-    cache_key = f"{user}_{period}_{len(df_cap_all)}_{df_cap_all['signed_amount'].sum():.2f}_{df_cap_all['flow_date_dt'].max()}"
+    cache_key = f"{user}_{initial_balance}_{period}"
     now = dt_datetime.now()
     
     if cache_key in _perf_cache:
@@ -1978,6 +1847,9 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     df_open = db.get_open_trades(user)
     print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}")
 
+    if df_closed.empty and df_open.empty:
+        return empty_fig, empty_fig, [], "⚠️ No hay trades para calcular"
+    
     # ── FILTRAR POR PERIODO ──
     today = pd.Timestamp.now().normalize()
 
@@ -2041,11 +1913,14 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     else:
         df_open_filtered = pd.DataFrame()
 
-    print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)} cerrados, {len(df_open_filtered)} abiertos, {len(df_cap_all)} mov. capital (historial completo)")
+    if df_filtered.empty and df_open_filtered.empty:
+        return empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}"
 
-    # ── CALCULAR PORTFOLIO (TWR) ──
+    print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)} cerrados, {len(df_open_filtered)} abiertos")
+    
+    # ── CALCULAR PORTFOLIO ──
     try:
-        daily_df = build_daily_portfolio(df_filtered, df_cap_for_build, df_open_filtered)
+        daily_df = build_daily_portfolio(df_filtered, initial_balance, df_open_filtered)
         # Recortar al periodo
         if period == "2025":
             daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
@@ -2054,10 +1929,9 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         elif period == "YOY":
             daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
         if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío"
-        # Rebasear el TWR al inicio del periodo mostrado (arranca en 0%)
-        daily_df = daily_df.reset_index(drop=True)
-        daily_df.loc[0, 'daily_return'] = 0.0
-        daily_df['cumulative_return'] = (1 + daily_df['daily_return']).cumprod() - 1
+        # Recalcular retorno acumulado desde el inicio del periodo (arranca en 0%)
+        period_start_value = daily_df['total_value'].iloc[0]
+        daily_df['cumulative_return'] = (daily_df['total_value'] / period_start_value) - 1
        # --- DESCARGA DE SPY PARA BENCHMARK ---
         # SPY se mide en el mismo periodo que el portfolio
         start_date_all = daily_df['date'].min()
@@ -2085,8 +1959,8 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
     period_start_value = daily_df['total_value'].iloc[0]
-    total_return = daily_df['cumulative_return'].iloc[-1] * 100
-    total_pnl = total_end - period_start_value
+    total_return = (total_end / period_start_value - 1) * 100
+    total_pnl = total_end - initial_balance
     cummax = daily_df['total_value'].cummax()
     daily_df['drawdown_pct'] = ((daily_df['total_value'] - cummax) / cummax) * 100
     max_dd = daily_df['drawdown_pct'].min()
@@ -2106,8 +1980,8 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     max_dd_spy = daily_df['spy_drawdown_pct'].min()
     total_return_spy = daily_df['norm_spy'].iloc[-1]
 
-    # Retornos Diarios (TWR: ya ajustados por aportes/retiros)
-    port_rets = daily_df['daily_return']
+    # Retornos Diarios
+    port_rets = daily_df['total_value'].pct_change().fillna(0)
     spy_rets = daily_df['spy_price'].pct_change().fillna(0)
     rfr_daily = 0.04 / 252 # Tasa libre de riesgo (4% anual)
     
@@ -2139,7 +2013,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         cov = np.cov(port_rets, spy_rets)
         beta = cov[0, 1] / cov[1, 1] if cov[1, 1] != 0 else 1.0
         # Alpha sobre retornos del período usando las mismas métricas que las tarjetas
-        port_total_ret = total_return / 100  # Retorno TWR del período (ya calculado arriba)
+        port_total_ret = total_return / 100  # Ya calculado arriba como (total_end / initial_balance - 1) * 100
         spy_total_ret = total_return_spy / 100  # Ya calculado arriba desde norm_spy
         n_days = len(daily_df)
         rfr_period = 0.04 * (n_days / 252)
@@ -2167,7 +2041,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         return dbc.Col(html.Div(content, style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
 
     kpis_layout = html.Div(dbc.Row([
-        make_perf_card("CAPITAL INICIAL", f"${capital_inicial:,.0f}"),
+        make_perf_card("CAPITAL INICIAL", f"${initial_balance:,.0f}"),
         make_perf_card("RETORNO TOTAL", f"{total_return:+.2f}%", f"SPY: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
         make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
         make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
