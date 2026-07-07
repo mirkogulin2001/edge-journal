@@ -200,7 +200,7 @@ def safe_float(val):
         elif ',' in s: s = s.replace(',', '.')
         return float(s)
     except: return 0.0
-def build_daily_portfolio(df_closed, initial_balance, df_open=None):
+def build_daily_portfolio(df_closed, initial_balance, df_open=None, cash_movements_df=None):
     """
     Calcula el valor diario del portfolio basado en trades históricos.
     Descarga precios diarios vía yfinance para posiciones abiertas en cada día.
@@ -210,9 +210,12 @@ def build_daily_portfolio(df_closed, initial_balance, df_open=None):
                    entry_price, exit_price, quantity, side)
         initial_balance: Capital inicial del portfolio
         df_open: DataFrame con trades abiertos (opcional). Se incluyen desde entry_date hasta hoy.
+        cash_movements_df: DataFrame opcional con aportes/retiros externos
+                           (columnas: movement_date, amount, movement_type)
 
     Returns:
-        DataFrame con: date, total_value, cumulative_return, daily_return
+        DataFrame con: date, total_value, cash, equity_value, external_flow,
+                       daily_return, cumulative_return (daily time-weighted return)
     """
     # Combinar trades cerrados y abiertos
     df_parts = []
@@ -230,13 +233,26 @@ def build_daily_portfolio(df_closed, initial_balance, df_open=None):
     if not df_parts:
         return pd.DataFrame(columns=['date', 'total_value', 'cumulative_return', 'daily_return'])
     df = pd.concat(df_parts, ignore_index=True)
-    
+
     # Rango de fechas
     start_date = df['entry_date'].min().date()
     end_date = df['exit_date'].max().date()
     if pd.isna(end_date) or end_date < date.today():
         end_date = date.today()
-    
+
+    # Preparar movimientos externos (aportes/retiros)
+    movements = pd.DataFrame()
+    if cash_movements_df is not None and not cash_movements_df.empty:
+        movements = cash_movements_df.copy()
+        movements['movement_date'] = pd.to_datetime(movements['movement_date']).dt.normalize()
+        movements['signed_amount'] = movements.apply(
+            lambda r: float(r['amount']) if r['movement_type'] == 'APORTE' else -float(r['amount']),
+            axis=1
+        )
+        # Extender el rango si hay movimientos fuera del rango de trades
+        start_date = min(start_date, movements['movement_date'].min().date())
+        end_date = max(end_date, movements['movement_date'].max().date())
+
     # Descargar precios históricos de todos los tickers
     tickers = list(df['symbol'].unique())
     try:
@@ -295,14 +311,40 @@ def build_daily_portfolio(df_closed, initial_balance, df_open=None):
             if pd.notna(exit_d):
                 cash_flows[exit_d] = cash_flows.get(exit_d, 0) - revenue
 
+    bday_index = prices.index
+
+    def snap_to_bday(d):
+        """Asigna una fecha al siguiente día hábil del índice (o al último si se pasa)."""
+        pos = bday_index.searchsorted(d)
+        if pos >= len(bday_index):
+            pos = len(bday_index) - 1
+        return bday_index[pos]
+
+    # Los flujos de trades en días no hábiles (ej: fecha de entrada un sábado) se
+    # reasignan al siguiente día hábil; si no, el loop diario los salta y el
+    # portfolio muestra un salto fantasma.
+    snapped_flows = {}
+    for d, amt in cash_flows.items():
+        key = snap_to_bday(d)
+        snapped_flows[key] = snapped_flows.get(key, 0) + amt
+    cash_flows = snapped_flows
+
+    # Flujos externos (aportes/retiros) por día hábil.
+    external_flows = {}
+    if not movements.empty:
+        for _, mov in movements.iterrows():
+            day_key = snap_to_bday(mov['movement_date'])
+            external_flows[day_key] = external_flows.get(day_key, 0) + mov['signed_amount']
+
     all_dates = prices.index
     daily_values = []
     cash = initial_balance
-    
+
     for day in all_dates:
-        # Sumamos/Restamos el flujo de caja del día
-        cash += cash_flows.get(day, 0)
-        
+        # Sumamos/Restamos el flujo de caja del día (trades + aportes/retiros)
+        ext_flow = external_flows.get(day, 0)
+        cash += cash_flows.get(day, 0) + ext_flow
+
         # Posiciones abiertas (Liability en caso de Shorts)
         open_trades = df[(df['entry_date'] <= day) & ((df['exit_date'].isna()) | (df['exit_date'] > day))]
         equity = 0.0
@@ -327,12 +369,19 @@ def build_daily_portfolio(df_closed, initial_balance, df_open=None):
                 
         # Total = Efectivo en cuenta + Valor de las inversiones (o - deudas short)
         total = cash + equity
-        daily_values.append({'date': day, 'total_value': total, 'cash': cash, 'equity_value': equity})
+        daily_values.append({'date': day, 'total_value': total, 'cash': cash, 'equity_value': equity, 'external_flow': ext_flow})
 
     result = pd.DataFrame(daily_values)
-    result['daily_return'] = result['total_value'].pct_change().fillna(0)
-    result['cumulative_return'] = (result['total_value'] / initial_balance - 1)
-    
+
+    # Daily Time-Weighted Return (método Schwab): cada retorno diario descuenta
+    # los aportes/retiros del día, así los flujos externos no afectan el % de retorno.
+    #   r_t = (V_t - CF_t) / V_{t-1} - 1   →   TWR = Π(1 + r_t) - 1
+    prev_value = result['total_value'].shift(1)
+    prev_value.iloc[0] = float(initial_balance)
+    denom = prev_value.where(prev_value > 0)
+    result['daily_return'] = ((result['total_value'] - result['external_flow']) / denom - 1).fillna(0.0)
+    result['cumulative_return'] = (1 + result['daily_return']).cumprod() - 1
+
     return result
 
 def parse_contents(contents, filename, username):
@@ -606,7 +655,7 @@ def run_monte_carlo_simulation(df_closed, n_simulations, kelly_fraction, trades_
 
     return fig_ret, fig_dd, fig_eq, fig_kelly, kpis
 # --- HELPER: ANALYTICS ---
-def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_metric):
+def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_metric, cash_movements_df=None):
     empty = {"layout": {"xaxis": {"visible": False}, "yaxis": {"visible": False}, "plot_bgcolor": "rgba(0,0,0,0)", "paper_bgcolor": "rgba(0,0,0,0)"}}
     
     def style_fig(fig):
@@ -637,7 +686,22 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
                     df_closed[k] = df_closed['tags'].apply(lambda x: (x or {}).get(k, "-"))
         
         df_closed['cum'] = df_closed['pnl'].cumsum()
-        df_closed['eq'] = start_bal + df_closed['cum']
+        # La curva de equity muestra el valor real de la cuenta: incluye aportes/retiros
+        # externos acumulados hasta la fecha de salida de cada trade.
+        if cash_movements_df is not None and not cash_movements_df.empty:
+            cm = cash_movements_df.copy()
+            cm['movement_date'] = pd.to_datetime(cm['movement_date'])
+            cm['signed_amount'] = cm.apply(
+                lambda r: float(r['amount']) if r['movement_type'] == 'APORTE' else -float(r['amount']),
+                axis=1
+            )
+            exit_dates = pd.to_datetime(df_closed['exit_date'])
+            df_closed['cum_flows'] = exit_dates.apply(
+                lambda d: cm.loc[cm['movement_date'] <= d, 'signed_amount'].sum()
+            )
+            df_closed['eq'] = start_bal + df_closed['cum_flows'] + df_closed['cum']
+        else:
+            df_closed['eq'] = start_bal + df_closed['cum']
         df_closed['peak'] = df_closed['eq'].cummax()
         df_closed['dd'] = ((df_closed['eq'] - df_closed['peak']) / df_closed['peak']) * 100
         total_pnl = df_closed['pnl'].sum()
@@ -855,20 +919,14 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         unrl = df_open['unrealized_pnl'].sum(); risk = df_open['open_risk'].sum()
         df_open['val'] = df_open['entry_price'] * df_open['quantity']
         pf_d = df_open.groupby('symbol')['val'].sum().reset_index(name='v')
-        liq = (df_closed['eq'].iloc[-1] if not df_closed.empty else start_bal) - df_open['val'].sum()
-        if liq < 0: liq = 0
-        fig_pie = px.pie(names=pf_d['symbol'].tolist()+['Liquidez'], values=pf_d['v'].tolist()+[liq], title='EXPOSICION', template='plotly_dark', hole=0.6, color_discrete_sequence=[COLOR_NEUTRAL, COLOR_POS, COLOR_NEG, COLOR_SPY])
-        fig_pie = style_fig(fig_pie)
-    else: fig_pie=empty
-
-    return fig_eq, fig_dd, fig_pie, fig_edge, fig_h, kpis, fig_s, fig_c, fig_evo_winrate, fig_evo_ratio
-
-    if not df_open.empty:
-        df_open = calculate_live_metrics(df_open)
-        unrl = df_open['unrealized_pnl'].sum(); risk = df_open['open_risk'].sum()
-        df_open['val'] = df_open['entry_price'] * df_open['quantity']
-        pf_d = df_open.groupby('symbol')['val'].sum().reset_index(name='v')
-        liq = (df_closed['eq'].iloc[-1] if not df_closed.empty else start_bal) - df_open['val'].sum()
+        # Capital disponible si no hay trades cerrados: inicial + aportes netos
+        base_capital = start_bal
+        if cash_movements_df is not None and not cash_movements_df.empty:
+            base_capital += cash_movements_df.apply(
+                lambda r: float(r['amount']) if r['movement_type'] == 'APORTE' else -float(r['amount']),
+                axis=1
+            ).sum()
+        liq = (df_closed['eq'].iloc[-1] if not df_closed.empty else base_capital) - df_open['val'].sum()
         if liq < 0: liq = 0
         fig_pie = px.pie(names=pf_d['symbol'].tolist()+['Liquidez'], values=pf_d['v'].tolist()+[liq], title='EXPOSICION', template='plotly_dark', hole=0.6, color_discrete_sequence=[COLOR_NEUTRAL, COLOR_POS, COLOR_NEG, COLOR_SPY])
         fig_pie = style_fig(fig_pie)
@@ -997,6 +1055,14 @@ app.validation_layout = html.Div([
     html.Button(id="btn-perf-all"),
     html.Button(id="btn-perf-2025"),
     html.Div(id="login-msg"),
+    # Componentes de Aportes y Retiros
+    dag.AgGrid(id="cash-movements-grid"),
+    dbc.Input(id="cm-date"),
+    dbc.Input(id="cm-amount"),
+    dbc.Select(id="cm-type"),
+    dbc.Button(id="btn-add-cm"),
+    dbc.Button(id="btn-del-cm"),
+    html.Div(id="cm-msg"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1279,7 +1345,9 @@ def render_tab(tab, session):
     elif tab == 'tab-performance':
         # Leer capital inicial de la config (mismo que Analytics)
         saved_bal = conf.get('initial_balance', 10000)
-        
+        df_cm = db.get_cash_movements(user)
+        cm_data = df_cm.to_dict("records") if not df_cm.empty else []
+
         return dbc.Container([
             # Título
             dbc.Row([
@@ -1315,7 +1383,40 @@ def render_tab(tab, session):
                     html.Div(id="perf-status", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "25px", "fontFamily": "Consolas, monospace"})
                 ], width=5)
             ], style={"marginTop": "15px", "marginBottom": "20px"}),
-            
+
+            # Tablero de aportes y retiros
+            dbc.Card([
+                dbc.CardHeader("APORTES Y RETIROS", style={"backgroundColor": "transparent", "borderBottom": f"1px solid {BORDER_COLOR}", "fontWeight": "bold", "color": TEXT_MAIN, "fontFamily": "Consolas"}),
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col(dbc.Input(id="cm-date", type="date", value=date.today(), style=INPUT_STYLE), width=3),
+                        dbc.Col(dbc.Input(id="cm-amount", placeholder="Monto ($)", type="number", min=0, style=INPUT_STYLE), width=3),
+                        dbc.Col(dbc.Select(id="cm-type", options=[{"label": "APORTE", "value": "APORTE"}, {"label": "RETIRO", "value": "RETIRO"}], value="APORTE", style=INPUT_STYLE), width=3),
+                        dbc.Col(dbc.Button("AGREGAR", id="btn-add-cm", color="light", className="w-100 fw-bold text-dark", style={"fontFamily": "Consolas", "border": "none"}), width=3)
+                    ], className="mb-3"),
+                    dag.AgGrid(
+                        id="cash-movements-grid",
+                        columnDefs=[
+                            {"field": "id", "checkboxSelection": True, "width": 70},
+                            {"field": "movement_date", "headerName": "Fecha", "width": 130},
+                            {"field": "amount", "headerName": "Monto ($)", "width": 130},
+                            {"field": "movement_type", "headerName": "Tipo", "flex": 1, "cellStyle": {"styleConditions": [
+                                {"condition": "params.value=='APORTE'", "style": {"color": COLOR_POS}},
+                                {"condition": "params.value=='RETIRO'", "style": {"color": COLOR_NEG}}
+                            ]}}
+                        ],
+                        rowData=cm_data,
+                        dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 10},
+                        className="ag-theme-alpine-dark",
+                        style={"height": "220px", "width": "100%", **CUSTOM_GRID_STYLE}
+                    ),
+                    dbc.Row([
+                        dbc.Col(dbc.Button("ELIMINAR SELECCION", id="btn-del-cm", color="dark", size="sm", style={"fontFamily": "Consolas", "border": f"1px solid {BORDER_COLOR}"}), width="auto"),
+                        dbc.Col(html.Div(id="cm-msg", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "5px", "fontFamily": "Consolas"}), width="auto")
+                    ], className="mt-2")
+                ], style={"backgroundColor": CARD_BG})
+            ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)", "marginBottom": "25px"}),
+
             # KPIs resumen
             html.Div(id="perf-kpis-container", style={"marginBottom": "25px"}),
             
@@ -1594,7 +1695,8 @@ def update_analytics(start_bal, selected_metric, session):
         
     df_closed = db.get_closed_trades(session['user'])
     df_open = db.get_open_trades(session['user'])
-    return get_analytics_figures(df_closed, df_open, capital_final, session.get('config', {}), selected_metric)
+    cash_movements_df = db.get_cash_movements(session['user'])
+    return get_analytics_figures(df_closed, df_open, capital_final, session.get('config', {}), selected_metric, cash_movements_df)
 
 # --- CALLBACK GRAFICO RIESGO LIVE ---
 @app.callback(Output("fig-live-risk", "figure"), [Input("live-chart-mode-selector", "value"), Input("open-grid", "rowData")], [State("session-store", "data")])
@@ -1766,6 +1868,43 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, p_date, usl, c_note
     df_open = db.get_open_trades(s['user'])
     if not df_open.empty: df_open = calculate_live_metrics(df_open)
     return "Actualizado.", format_df(df_open, s.get('config', {})), {'display': 'none'}, []
+
+# --- CALLBACK APORTES Y RETIROS ---
+@app.callback(
+    [Output("cash-movements-grid", "rowData"), Output("cm-msg", "children")],
+    [Input("btn-add-cm", "n_clicks"), Input("btn-del-cm", "n_clicks")],
+    [State("cm-date", "value"), State("cm-amount", "value"),
+     State("cm-type", "value"), State("cash-movements-grid", "selectedRows"),
+     State("session-store", "data")],
+    prevent_initial_call=True
+)
+def manage_cash_movements(n_add, n_del, cm_date, cm_amount, cm_type, selected, session):
+    if not session: return no_update, ""
+    user = session['user']
+
+    def _refresh():
+        # Invalidar cache de Performance para que el próximo cálculo use los nuevos flujos
+        _perf_cache.clear()
+        _perf_cache_time.clear()
+        df = db.get_cash_movements(user)
+        return df.to_dict("records") if not df.empty else []
+
+    if ctx.triggered_id == "btn-add-cm":
+        if not cm_date or not cm_amount or float(cm_amount) <= 0:
+            return no_update, "⚠️ Completar fecha y monto válido."
+        if not db.add_cash_movement(user, cm_date, cm_amount, cm_type):
+            return no_update, "⚠️ Error al guardar el movimiento."
+        return _refresh(), "✓ Movimiento agregado. Elegí un período para recalcular."
+
+    if ctx.triggered_id == "btn-del-cm":
+        if not selected:
+            return no_update, "⚠️ Seleccioná un movimiento para eliminar."
+        if not db.delete_cash_movement(selected[0]['id']):
+            return no_update, "⚠️ Error al eliminar el movimiento."
+        return _refresh(), "✓ Movimiento eliminado. Elegí un período para recalcular."
+
+    return no_update, ""
+
 # ══════════════════════════════════════════════════════════
 # REEMPLAZÁ tu callback update_performance por este
 # (es el mismo pero con prints de diagnóstico al inicio)
@@ -1842,10 +1981,11 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         else:
             print(f"[PERF] 🔄 Cache expirado ({elapsed:.0f}s)")
     
-    # ── OBTENER TRADES ──
+    # ── OBTENER TRADES Y MOVIMIENTOS DE CAPITAL ──
     df_closed = db.get_closed_trades(user)
     df_open = db.get_open_trades(user)
-    print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}")
+    cash_movements_df = db.get_cash_movements(user)
+    print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}, movimientos: {len(cash_movements_df)}")
 
     if df_closed.empty and df_open.empty:
         return empty_fig, empty_fig, [], "⚠️ No hay trades para calcular"
@@ -1920,7 +2060,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # ── CALCULAR PORTFOLIO ──
     try:
-        daily_df = build_daily_portfolio(df_filtered, initial_balance, df_open_filtered)
+        daily_df = build_daily_portfolio(df_filtered, initial_balance, df_open_filtered, cash_movements_df)
         # Recortar al periodo
         if period == "2025":
             daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
@@ -1929,9 +2069,12 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         elif period == "YOY":
             daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
         if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío"
+        daily_df = daily_df.reset_index(drop=True)
         # Recalcular retorno acumulado desde el inicio del periodo (arranca en 0%)
-        period_start_value = daily_df['total_value'].iloc[0]
-        daily_df['cumulative_return'] = (daily_df['total_value'] / period_start_value) - 1
+        # encadenando los retornos diarios TWR (los aportes/retiros no afectan el %)
+        period_rets = daily_df['daily_return'].copy()
+        period_rets.iloc[0] = 0.0
+        daily_df['cumulative_return'] = (1 + period_rets).cumprod() - 1
        # --- DESCARGA DE SPY PARA BENCHMARK ---
         # SPY se mide en el mismo periodo que el portfolio
         start_date_all = daily_df['date'].min()
@@ -1958,11 +2101,24 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
-    period_start_value = daily_df['total_value'].iloc[0]
-    total_return = (total_end / period_start_value - 1) * 100
-    total_pnl = total_end - initial_balance
-    cummax = daily_df['total_value'].cummax()
-    daily_df['drawdown_pct'] = ((daily_df['total_value'] - cummax) / cummax) * 100
+    # Retorno del período: TWR encadenado (neutraliza aportes/retiros)
+    total_return = daily_df['cumulative_return'].iloc[-1] * 100
+
+    # Aportes y retiros totales (historial completo)
+    total_deposits = 0.0
+    total_withdrawals = 0.0
+    if not cash_movements_df.empty:
+        amounts = cash_movements_df['amount'].astype(float)
+        is_deposit = cash_movements_df['movement_type'] == 'APORTE'
+        total_deposits = amounts[is_deposit].sum()
+        total_withdrawals = amounts[~is_deposit].sum()
+    net_invested = initial_balance + total_deposits - total_withdrawals
+    total_pnl = total_end - net_invested
+
+    # Drawdown sobre la curva TWR (un retiro no cuenta como caída)
+    twr_curve = 1 + daily_df['cumulative_return']
+    cummax = twr_curve.cummax()
+    daily_df['drawdown_pct'] = ((twr_curve - cummax) / cummax) * 100
     max_dd = daily_df['drawdown_pct'].min()
     current_dd = daily_df['drawdown_pct'].iloc[-1]
     
@@ -1980,8 +2136,8 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     max_dd_spy = daily_df['spy_drawdown_pct'].min()
     total_return_spy = daily_df['norm_spy'].iloc[-1]
 
-    # Retornos Diarios
-    port_rets = daily_df['total_value'].pct_change().fillna(0)
+    # Retornos Diarios (TWR: excluyen el efecto de aportes/retiros)
+    port_rets = period_rets
     spy_rets = daily_df['spy_price'].pct_change().fillna(0)
     rfr_daily = 0.04 / 252 # Tasa libre de riesgo (4% anual)
     
@@ -2040,9 +2196,19 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
             content.append(html.P(sub_text, style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "marginTop": "6px", "marginBottom": "0", "fontFamily": "Consolas, monospace"}))
         return dbc.Col(html.Div(content, style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
 
+    flow_cards = []
+    if not cash_movements_df.empty:
+        flow_cards = [
+            make_perf_card("APORTES", f"${total_deposits:,.0f}", "Depósitos externos", COLOR_POS),
+            make_perf_card("RETIROS", f"${total_withdrawals:,.0f}", "Extracciones", COLOR_NEG),
+            make_perf_card("CAPITAL NETO INVERTIDO", f"${net_invested:,.0f}", "Inicial + Aportes - Retiros"),
+            make_perf_card("GANANCIA NETA", f"${total_pnl:+,.0f}", "Valor actual - Invertido", COLOR_POS if total_pnl >= 0 else COLOR_NEG),
+        ]
+
     kpis_layout = html.Div(dbc.Row([
         make_perf_card("CAPITAL INICIAL", f"${initial_balance:,.0f}"),
-        make_perf_card("RETORNO TOTAL", f"{total_return:+.2f}%", f"SPY: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
+        *flow_cards,
+        make_perf_card("RETORNO TOTAL (TWR)", f"{total_return:+.2f}%", f"SPY: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
         make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
         make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
         make_perf_card("SORTINO RATIO", f"{sortino_port:.2f}", f"SPY: {sortino_spy:.2f}", TEXT_MAIN),
