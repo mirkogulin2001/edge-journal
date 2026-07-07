@@ -214,3 +214,41 @@ def delete_all_closed_trades(user):
     except Exception as e:
         print(f"Error delete all: {e}")
         return False
+
+# --- FUNCIONES DE APORTES Y RETIROS (CASH MOVEMENTS) ---
+
+def get_cash_movements(username):
+    """Obtiene todos los aportes/retiros de un usuario ordenados por fecha."""
+    try:
+        response = supabase.table("cash_movements").select("*")\
+            .eq("username", username)\
+            .order("movement_date", desc=False)\
+            .execute()
+        return pd.DataFrame(response.data) if response.data else pd.DataFrame()
+    except Exception as e:
+        print(f"Error get_cash_movements: {e}")
+        return pd.DataFrame()
+
+def add_cash_movement(username, movement_date, amount, movement_type):
+    """Registra un aporte o retiro. movement_type: 'APORTE' o 'RETIRO'."""
+    try:
+        data = {
+            "username": username,
+            "movement_date": str(movement_date),
+            "amount": float(amount),
+            "movement_type": movement_type
+        }
+        supabase.table("cash_movements").insert(data).execute()
+        return True
+    except Exception as e:
+        print(f"Error add_cash_movement: {e}")
+        return False
+
+def delete_cash_movement(movement_id):
+    """Elimina un aporte/retiro por id."""
+    try:
+        supabase.table("cash_movements").delete().eq("id", movement_id).execute()
+        return True
+    except Exception as e:
+        print(f"Error delete_cash_movement: {e}")
+        return False
