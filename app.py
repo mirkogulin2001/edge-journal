@@ -2101,19 +2101,30 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
+    period_start_value = daily_df['total_value'].iloc[0]
     # Retorno del período: TWR encadenado (neutraliza aportes/retiros)
     total_return = daily_df['cumulative_return'].iloc[-1] * 100
 
-    # Aportes y retiros totales (historial completo)
+    # Aportes y retiros DEL PERÍODO visualizado (criterio Schwab:
+    # "Net Contributions - This Period", no el historial completo)
+    p_start = daily_df['date'].iloc[0]
+    p_end = daily_df['date'].iloc[-1]
     total_deposits = 0.0
     total_withdrawals = 0.0
     if not cash_movements_df.empty:
-        amounts = cash_movements_df['amount'].astype(float)
-        is_deposit = cash_movements_df['movement_type'] == 'APORTE'
-        total_deposits = amounts[is_deposit].sum()
-        total_withdrawals = amounts[~is_deposit].sum()
-    net_invested = initial_balance + total_deposits - total_withdrawals
-    total_pnl = total_end - net_invested
+        cm_dates = pd.to_datetime(cash_movements_df['movement_date'])
+        cm_period = cash_movements_df[(cm_dates >= p_start) & (cm_dates <= p_end)]
+        if not cm_period.empty:
+            amounts = cm_period['amount'].astype(float)
+            is_deposit = cm_period['movement_type'] == 'APORTE'
+            total_deposits = amounts[is_deposit].sum()
+            total_withdrawals = amounts[~is_deposit].sum()
+
+    # Ganancia neta del período ("Investment Change" de Schwab):
+    # valor final - valor inicial - flujos netos del período.
+    # Se excluye el día 1 para ser consistente con el TWR re-encadenado (arranca en 0%).
+    net_flows_in_period = daily_df['external_flow'].iloc[1:].sum()
+    total_pnl = total_end - period_start_value - net_flows_in_period
 
     # Drawdown sobre la curva TWR (un retiro no cuenta como caída)
     twr_curve = 1 + daily_df['cumulative_return']
@@ -2199,15 +2210,16 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     flow_cards = []
     if not cash_movements_df.empty:
         flow_cards = [
-            make_perf_card("APORTES", f"${total_deposits:,.0f}", "Depósitos externos", COLOR_POS),
-            make_perf_card("RETIROS", f"${total_withdrawals:,.0f}", "Extracciones", COLOR_NEG),
-            make_perf_card("CAPITAL NETO INVERTIDO", f"${net_invested:,.0f}", "Inicial + Aportes - Retiros"),
-            make_perf_card("GANANCIA NETA", f"${total_pnl:+,.0f}", "Valor actual - Invertido", COLOR_POS if total_pnl >= 0 else COLOR_NEG),
+            make_perf_card("APORTES (PERÍODO)", f"${total_deposits:,.0f}", "Depósitos externos", COLOR_POS),
+            make_perf_card("RETIROS (PERÍODO)", f"${total_withdrawals:,.0f}", "Extracciones", COLOR_NEG),
         ]
 
     kpis_layout = html.Div(dbc.Row([
         make_perf_card("CAPITAL INICIAL", f"${initial_balance:,.0f}"),
+        make_perf_card("VALOR INICIAL", f"${period_start_value:,.0f}", "Inicio del período"),
         *flow_cards,
+        make_perf_card("GANANCIA NETA", f"${total_pnl:+,.0f}", "Excluye aportes/retiros", COLOR_POS if total_pnl >= 0 else COLOR_NEG),
+        make_perf_card("VALOR FINAL", f"${total_end:,.0f}", "Fin del período"),
         make_perf_card("RETORNO TOTAL (TWR)", f"{total_return:+.2f}%", f"SPY: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
         make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
         make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
