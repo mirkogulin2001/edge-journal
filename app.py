@@ -2106,7 +2106,12 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     
     # ── CALCULAR PORTFOLIO ──
     try:
-        daily_df = build_daily_portfolio(df_filtered, initial_balance, df_open_filtered, cash_movements_df)
+        # Construir SIEMPRE con el historial completo (cerrados + abiertos + movimientos)
+        # y recién después recortar al período. Si se filtran los trades antes del build,
+        # el PnL realizado previo al período no se acumula al cash y el valor inicial del
+        # período queda subestimado (infla el TWR). El valor de arranque del período debe
+        # ser el valor real arrastrado de la cuenta (= "Beginning Account Value" del broker).
+        daily_df = build_daily_portfolio(df_closed, initial_balance, df_open, cash_movements_df)
         # Recortar al periodo
         if period == "2025":
             daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
