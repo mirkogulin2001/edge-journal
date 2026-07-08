@@ -1063,6 +1063,11 @@ app.validation_layout = html.Div([
     dbc.Button(id="btn-add-cm"),
     dbc.Button(id="btn-del-cm"),
     html.Div(id="cm-msg"),
+    # Componentes de diagnóstico de valuación
+    dcc.Graph(id="fig-perf-value"),
+    dbc.Button(id="btn-export-daily"),
+    dcc.Download(id="download-daily"),
+    dcc.Store(id="perf-daily-store"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1381,7 +1386,19 @@ def render_tab(tab, session):
                 
                 dbc.Col([
                     html.Div(id="perf-status", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "25px", "fontFamily": "Consolas, monospace"})
-                ], width=5)
+                ], width=3),
+
+                dbc.Col([
+                    html.Div(style={"height": "20px"}),  # Spacer
+                    dbc.Button(
+                        "EXPORTAR CSV",
+                        id="btn-export-daily",
+                        color="dark", outline=True, size="sm",
+                        style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}
+                    ),
+                    dcc.Download(id="download-daily"),
+                    dcc.Store(id="perf-daily-store")
+                ], width=2)
             ], style={"marginTop": "15px", "marginBottom": "20px"}),
 
             # Tablero de aportes y retiros
@@ -1446,8 +1463,22 @@ def render_tab(tab, session):
                                            "font": {"color": COLOR_NEUTRAL}}}
                     )
                 ], width=12)
+            ], style={"marginTop": "10px"}),
+
+            # Gráfico terciario: Valor de cuenta vs contribuciones netas (estilo Schwab)
+            dbc.Row([
+                dbc.Col([
+                    dcc.Graph(
+                        id="fig-perf-value",
+                        config={'displayModeBar': False},
+                        style={"height": "350px"},
+                        figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
+                                           "xaxis": {"visible": False}, "yaxis": {"visible": False},
+                                           "font": {"color": COLOR_NEUTRAL}}}
+                    )
+                ], width=12)
             ], style={"marginTop": "10px"})
-            
+
         ], fluid=True, style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "padding": "20px"})
     
     elif tab == 'tab-info':
@@ -1905,6 +1936,19 @@ def manage_cash_movements(n_add, n_del, cm_date, cm_amount, cm_type, selected, s
 
     return no_update, ""
 
+# --- CALLBACK EXPORT SERIE DIARIA (diagnóstico de valuación) ---
+@app.callback(
+    Output("download-daily", "data"),
+    Input("btn-export-daily", "n_clicks"),
+    State("perf-daily-store", "data"),
+    prevent_initial_call=True
+)
+def export_daily_series(n_clicks, store_data):
+    if not store_data:
+        return no_update
+    df = pd.DataFrame(store_data)
+    return dcc.send_data_frame(df.to_csv, "edge_journal_serie_diaria.csv", index=False)
+
 # ══════════════════════════════════════════════════════════
 # REEMPLAZÁ tu callback update_performance por este
 # (es el mismo pero con prints de diagnóstico al inicio)
@@ -1914,8 +1958,10 @@ def manage_cash_movements(n_add, n_del, cm_date, cm_amount, cm_type, selected, s
     [
         Output("fig-perf-cumulative", "figure"),
         Output("fig-perf-drawdown", "figure"),
+        Output("fig-perf-value", "figure"),
         Output("perf-kpis-container", "children"),
-        Output("perf-status", "children")
+        Output("perf-status", "children"),
+        Output("perf-daily-store", "data")
     ],
     [
     Input("btn-perf-ytd", "n_clicks"),
@@ -1928,7 +1974,7 @@ def manage_cash_movements(n_add, n_del, cm_date, cm_amount, cm_type, selected, s
 )
 def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     """Calcula y muestra el retorno acumulado del portfolio por periodo."""
-    
+
     # Determinar qué botón se apretó
     triggered = ctx.triggered_id
     if triggered == "btn-perf-ytd":
@@ -1936,38 +1982,38 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     elif triggered == "btn-perf-yoy":
         period = "YOY"
     elif triggered == "btn-perf-2025":
-        period = "2025"    
+        period = "2025"
     else:
         period = "ALL"
-    
+
     print("=" * 60)
     print(f"[PERF] 🔥 CALLBACK DISPARADO! Periodo={period}")
     print(f"[PERF] session={session is not None}")
     print("=" * 60)
-    
+
     empty_fig = go.Figure()
     empty_fig.update_layout(
         paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG,
         font_color=COLOR_NEUTRAL, font_family="Consolas, monospace",
         xaxis=dict(visible=False), yaxis=dict(visible=False)
     )
-    
+
     if not session:
-        return empty_fig, empty_fig, [], "⚠️ Sin sesión"
-    
+        return empty_fig, empty_fig, empty_fig, [], "⚠️ Sin sesión", None
+
     user = session['user']
-    
+
     # Leer capital inicial de la config (mismo que Analytics)
     conf = session.get('config', {})
     initial_balance = conf.get('initial_balance', 10000)
-    
+
     try:
         initial_balance = float(initial_balance)
     except:
         initial_balance = 10000.0
-    
+
     if initial_balance <= 0:
-        return empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics"
+        return empty_fig, empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics", None
     
     # ── CACHE CHECK ──
     cache_key = f"{user}_{initial_balance}_{period}"
@@ -1988,7 +2034,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}, movimientos: {len(cash_movements_df)}")
 
     if df_closed.empty and df_open.empty:
-        return empty_fig, empty_fig, [], "⚠️ No hay trades para calcular"
+        return empty_fig, empty_fig, empty_fig, [], "⚠️ No hay trades para calcular", None
     
     # ── FILTRAR POR PERIODO ──
     today = pd.Timestamp.now().normalize()
@@ -2054,7 +2100,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         df_open_filtered = pd.DataFrame()
 
     if df_filtered.empty and df_open_filtered.empty:
-        return empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}"
+        return empty_fig, empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}", None
 
     print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)} cerrados, {len(df_open_filtered)} abiertos")
     
@@ -2068,7 +2114,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
             daily_df = daily_df[daily_df['date'] >= pd.Timestamp(today.year, 1, 1)]
         elif period == "YOY":
             daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
-        if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío"
+        if daily_df.empty: return empty_fig, empty_fig, empty_fig, [], "⚠️ Portfolio vacío", None
         daily_df = daily_df.reset_index(drop=True)
         # Recalcular retorno acumulado desde el inicio del periodo (arranca en 0%)
         # encadenando los retornos diarios TWR (los aportes/retiros no afectan el %)
@@ -2097,7 +2143,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
             
     except Exception as e:
         import traceback; traceback.print_exc()
-        return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}"
+        return empty_fig, empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", None
     
     # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
@@ -2246,11 +2292,42 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     fig_drawdown.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['drawdown_pct'], mode='lines', line=dict(color=COLOR_NEG, width=1.5), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)', name='Drawdown', hovertemplate='%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>'))
     fig_drawdown.update_layout(title={'text': 'DRAWDOWN (%)', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 'x': 0.5, 'xanchor': 'center'}, paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas, monospace", hovermode='x unified', margin=dict(l=60, r=30, t=40, b=30), yaxis=dict(title="DD (%)", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(title="Fecha", showgrid=False), showlegend=False)
     
+    # Gráfico valor de cuenta vs contribuciones netas (réplica de "Value vs. net
+    # contributions" de Schwab, para comparar la valuación día a día)
+    flows_after_day1 = daily_df['external_flow'].copy()
+    flows_after_day1.iloc[0] = 0.0
+    daily_df['net_contrib_line'] = period_start_value + flows_after_day1.cumsum()
+    fig_value = go.Figure()
+    fig_value.add_trace(go.Scatter(
+        x=daily_df['date'], y=daily_df['net_contrib_line'], mode='lines', name='Contribuciones Netas',
+        line=dict(color=COLOR_NEUTRAL, width=1, dash='dash'),
+        hovertemplate='%{x|%Y-%m-%d}<br>Contribuciones: %{y:$,.2f}<extra></extra>'
+    ))
+    fig_value.add_trace(go.Scatter(
+        x=daily_df['date'], y=daily_df['total_value'], mode='lines', name='Valor de Cuenta',
+        line=dict(color=COLOR_SPY, width=2), fill='tonexty', fillcolor='rgba(252, 213, 53, 0.08)',
+        hovertemplate='%{x|%Y-%m-%d}<br>Valor: %{y:$,.2f}<extra></extra>'
+    ))
+    fig_value.update_layout(
+        title={'text': 'VALOR DE CUENTA VS CONTRIBUCIONES NETAS ($)', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 'x': 0.5, 'xanchor': 'center'},
+        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas, monospace",
+        hovermode='x unified', margin=dict(l=60, r=30, t=40, b=30),
+        yaxis=dict(title="Valor ($)", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, tickformat='$,.0f'),
+        xaxis=dict(title="Fecha", showgrid=False),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+    )
+
+    # Serie diaria para exportar (diagnóstico de valuación vs broker)
+    export_cols = ['date', 'total_value', 'cash', 'equity_value', 'external_flow', 'daily_return', 'cumulative_return']
+    store_df = daily_df[export_cols].copy()
+    store_df['date'] = store_df['date'].dt.strftime('%Y-%m-%d')
+    store_data = store_df.to_dict('records')
+
     open_count = len(df_open_filtered) if not df_open_filtered.empty else 0
     status = f"✓ {period_label} | {len(df_filtered)} cerrados + {open_count} abiertos | {len(daily_df)} días | Retorno: {total_return:+.2f}%"
     print(f"[PERF] ✅ {status}")
-    
-    result = (fig_cumulative, fig_drawdown, kpis_layout, status)
+
+    result = (fig_cumulative, fig_drawdown, fig_value, kpis_layout, status, store_data)
     _perf_cache[cache_key] = result; _perf_cache_time[cache_key] = now
     return result
 
