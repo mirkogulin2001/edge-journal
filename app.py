@@ -133,12 +133,22 @@ def format_df(df, user_config):
                 df[param] = df['tags'].apply(lambda x: (x or {}).get(param, "-"))
     return df.to_dict("records")
 
+def add_pnl_pct(df):
+    """Agrega columna pnl_pct: retorno % del trade sobre el capital invertido (entrada × cantidad)."""
+    if df.empty or 'pnl' not in df.columns:
+        return df
+    cost = (pd.to_numeric(df['entry_price'], errors='coerce') * pd.to_numeric(df['quantity'], errors='coerce')).replace(0, pd.NA)
+    df['pnl_pct'] = (pd.to_numeric(df['pnl'], errors='coerce') / cost * 100).fillna(0.0).astype(float).round(2)
+    return df
+
 def calculate_live_metrics(df_open):
     if df_open.empty: return df_open
     df_open['current_price'] = df_open['entry_price']
     df_open['unrealized_pnl'] = 0.0
     df_open['open_risk'] = 0.0
-    
+    df_open['unrealized_pnl_pct'] = 0.0
+    df_open['open_risk_pct'] = 0.0
+
     try:
         tickers = [t for t in df_open['symbol'].unique() if t]
         if tickers:
@@ -165,12 +175,16 @@ def calculate_live_metrics(df_open):
                     axis=1
                 )
                 df_open['open_risk'] = df_open.apply(
-                    lambda x: (x['current_stop_loss']-x['entry_price'])*x['quantity'] 
-                    if x['side']=='LONG' 
-                    else (x['entry_price']-x['current_stop_loss'])*x['quantity'], 
+                    lambda x: (x['current_stop_loss']-x['entry_price'])*x['quantity']
+                    if x['side']=='LONG'
+                    else (x['entry_price']-x['current_stop_loss'])*x['quantity'],
                     axis=1
                 )
-                for c in ['current_price','unrealized_pnl','open_risk']: 
+                # Versión porcentual sobre el costo de la posición (entrada × cantidad)
+                cost = (df_open['entry_price'] * df_open['quantity']).replace(0, pd.NA)
+                df_open['unrealized_pnl_pct'] = (df_open['unrealized_pnl'] / cost * 100).fillna(0.0)
+                df_open['open_risk_pct'] = (df_open['open_risk'] / cost * 100).fillna(0.0)
+                for c in ['current_price','unrealized_pnl','open_risk','unrealized_pnl_pct','open_risk_pct']:
                     df_open[c] = df_open[c].astype(float).round(2)
     except Exception as e:
         print(f"[ERROR] calculate_live_metrics: {e}")
@@ -686,22 +700,9 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
                     df_closed[k] = df_closed['tags'].apply(lambda x: (x or {}).get(k, "-"))
         
         df_closed['cum'] = df_closed['pnl'].cumsum()
-        # La curva de equity muestra el valor real de la cuenta: incluye aportes/retiros
-        # externos acumulados hasta la fecha de salida de cada trade.
-        if cash_movements_df is not None and not cash_movements_df.empty:
-            cm = cash_movements_df.copy()
-            cm['movement_date'] = pd.to_datetime(cm['movement_date'])
-            cm['signed_amount'] = cm.apply(
-                lambda r: float(r['amount']) if r['movement_type'] == 'APORTE' else -float(r['amount']),
-                axis=1
-            )
-            exit_dates = pd.to_datetime(df_closed['exit_date'])
-            df_closed['cum_flows'] = exit_dates.apply(
-                lambda d: cm.loc[cm['movement_date'] <= d, 'signed_amount'].sum()
-            )
-            df_closed['eq'] = start_bal + df_closed['cum_flows'] + df_closed['cum']
-        else:
-            df_closed['eq'] = start_bal + df_closed['cum']
+        # La curva de equity refleja solo el resultado de la operatoria:
+        # capital inicial + PnL acumulado, sin aportes/retiros externos.
+        df_closed['eq'] = start_bal + df_closed['cum']
         df_closed['peak'] = df_closed['eq'].cummax()
         df_closed['dd'] = ((df_closed['eq'] - df_closed['peak']) / df_closed['peak']) * 100
         total_pnl = df_closed['pnl'].sum()
@@ -919,14 +920,16 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         unrl = df_open['unrealized_pnl'].sum(); risk = df_open['open_risk'].sum()
         df_open['val'] = df_open['entry_price'] * df_open['quantity']
         pf_d = df_open.groupby('symbol')['val'].sum().reset_index(name='v')
-        # Capital disponible si no hay trades cerrados: inicial + aportes netos
-        base_capital = start_bal
+        # La liquidez sí considera los aportes/retiros externos (valor real de cuenta),
+        # aunque la curva de equity no los incluya.
+        net_flows = 0.0
         if cash_movements_df is not None and not cash_movements_df.empty:
-            base_capital += cash_movements_df.apply(
+            net_flows = cash_movements_df.apply(
                 lambda r: float(r['amount']) if r['movement_type'] == 'APORTE' else -float(r['amount']),
                 axis=1
             ).sum()
-        liq = (df_closed['eq'].iloc[-1] if not df_closed.empty else base_capital) - df_open['val'].sum()
+        account_value = (df_closed['eq'].iloc[-1] if not df_closed.empty else start_bal) + net_flows
+        liq = account_value - df_open['val'].sum()
         if liq < 0: liq = 0
         fig_pie = px.pie(names=pf_d['symbol'].tolist()+['Liquidez'], values=pf_d['v'].tolist()+[liq], title='EXPOSICION', template='plotly_dark', hole=0.6, color_discrete_sequence=[COLOR_NEUTRAL, COLOR_POS, COLOR_NEG, COLOR_SPY])
         fig_pie = style_fig(fig_pie)
@@ -1068,6 +1071,8 @@ app.validation_layout = html.Div([
     dbc.Button(id="btn-export-daily"),
     dcc.Download(id="download-daily"),
     dcc.Store(id="perf-daily-store"),
+    # Toggle $/% de posiciones activas
+    dbc.RadioItems(id="pnl-mode-toggle"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1201,11 +1206,23 @@ def save_balance_change(bal, session):
         return session
     return no_update
 
+def build_open_grid_cols(conf, mode="$"):
+    """Columnas del grid de posiciones activas. mode '$' muestra PnL/Riesgo en
+    valor absoluto; mode '%' los muestra en porcentaje sobre el costo de la posición."""
+    dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k != 'initial_balance'] if isinstance(conf, dict) else []
+    if mode == "%":
+        pnl_col = {"field": "unrealized_pnl_pct", "headerName": "PnL (%)", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
+        risk_col = {"field": "open_risk_pct", "headerName": "Riesgo (%)", "width": 90, "cellStyle": {'color': COLOR_NEG}}
+    else:
+        pnl_col = {"field": "unrealized_pnl", "headerName": "PnL ($)", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
+        risk_col = {"field": "open_risk", "headerName": "Riesgo", "width": 90, "cellStyle": {'color': COLOR_NEG}}
+    return [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 70}] + dyn_cols + [{"field": "entry_price", "headerName": "In", "width": 90}, {"field": "current_price", "headerName": "Live", "width": 90, "cellStyle": {'fontWeight': 'bold'}}, pnl_col, risk_col, {"field": "current_stop_loss", "headerName": "SL Act", "width": 90, "editable": True, "cellStyle": {'color': TEXT_MAIN, 'fontWeight': 'bold', 'backgroundColor': '#2B3139'}}]
+
 @app.callback(Output('tab-content', 'children'), [Input('tabs', 'value'), Input('session-store', 'data')])
 def render_tab(tab, session):
     if not session: return html.Div()
     user, conf = session['user'], session.get('config', {})
-    
+
     if tab == 'tab-active':
         df = db.get_open_trades(user)
         if not df.empty: df = calculate_live_metrics(df)
@@ -1218,9 +1235,8 @@ def render_tab(tab, session):
                     row.append(dbc.Col([dbc.Label(p, className="small fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Select(id={'type': 'strat-input', 'index': p}, options=[{"label": str(o), "value": str(o)} for o in opts], style=INPUT_STYLE)], width=3, className="mb-3"))
             for i in range(0, len(row), 4): dyn_inputs.append(dbc.Row(row[i:i+4]))
         
-        dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k != 'initial_balance'] if isinstance(conf, dict) else []
-        cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 70}] + dyn_cols + [{"field": "entry_price", "headerName": "In", "width": 90}, {"field": "current_price", "headerName": "Live", "width": 90, "cellStyle": {'fontWeight': 'bold'}}, {"field": "unrealized_pnl", "headerName": "PnL ($)", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, {"field": "open_risk", "headerName": "Riesgo", "width": 90, "cellStyle": {'color': COLOR_NEG}}, {"field": "current_stop_loss", "headerName": "SL Act", "width": 90, "editable": True, "cellStyle": {'color': TEXT_MAIN, 'fontWeight': 'bold', 'backgroundColor': '#2B3139'}}]
-        
+        cols = build_open_grid_cols(conf, "$")
+
         return dbc.Row([
             dbc.Col([
                 dbc.Card([
@@ -1241,7 +1257,20 @@ def render_tab(tab, session):
                 get_management_panel()
             ], width=5), 
             dbc.Col([
-                html.H5("POSICIONES ACTIVAS", className="fw-bold mb-3", style={"color": TEXT_MAIN}), 
+                dbc.Row([
+                    dbc.Col(html.H5("POSICIONES ACTIVAS", className="fw-bold mb-3", style={"color": TEXT_MAIN}), width=8),
+                    dbc.Col(dbc.RadioItems(
+                        id="pnl-mode-toggle",
+                        options=[{"label": "$", "value": "$"}, {"label": "%", "value": "%"}],
+                        value="$",
+                        inline=True,
+                        className="btn-group",
+                        inputClassName="btn-check",
+                        labelClassName="btn btn-sm btn-outline-secondary fw-bold",
+                        labelCheckedClassName="active",
+                        style={"fontFamily": "Consolas"}
+                    ), width=4, className="text-end")
+                ]),
                 html.Div(dag.AgGrid(id="open-grid", rowData=format_df(df, conf), columnDefs=cols, dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 10}, className="ag-theme-alpine-dark", style={"height": "350px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"}),
                 html.Hr(style={"borderColor": BORDER_COLOR, "margin": "30px 0"}),
                 dbc.Row([
@@ -1254,16 +1283,17 @@ def render_tab(tab, session):
 
     elif tab == 'tab-history':
         df = db.get_closed_trades(user)
-        
+        df = add_pnl_pct(df)
+
         if not df.empty and 'exit_date' in df.columns:
             df = df.sort_values('exit_date', ascending=True)
             df['visual_id'] = range(1, len(df) + 1)
             df = df.sort_values('exit_date', ascending=False)
         else:
-            df['visual_id'] = [] 
+            df['visual_id'] = []
             
         dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k != 'initial_balance'] if isinstance(conf, dict) else []
-        cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "visual_id", "headerName": "#", "width": 60, "sortable": True}, {"field": "entry_date", "width": 100}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 80}, {"field": "result_type", "width": 70}, {"field": "entry_price", "width": 90}, {"field": "exit_price", "width": 90}, {"field": "initial_stop_loss", "width": 80}, {"field": "current_stop_loss", "width": 80}] + dyn_cols + [{"field": "rr", "headerName": "R", "width": 80}, {"field": "pnl", "headerName": "PnL", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, 
+        cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "visual_id", "headerName": "#", "width": 60, "sortable": True}, {"field": "entry_date", "width": 100}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 80}, {"field": "result_type", "width": 70}, {"field": "entry_price", "width": 90}, {"field": "exit_price", "width": 90}, {"field": "initial_stop_loss", "width": 80}, {"field": "current_stop_loss", "width": 80}] + dyn_cols + [{"field": "rr", "headerName": "R", "width": 80}, {"field": "pnl", "headerName": "PnL", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, {"field": "pnl_pct", "headerName": "PnL %", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}},
                 # --- NOTAS ---
                 {"field": "entry_notes", "headerName": "Notas Entrada", "width": 200, "editable": True, "cellEditor": "agLargeTextCellEditor"},
                 {"field": "exit_notes", "headerName": "Notas Salida", "width": 200, "editable": True, "cellEditor": "agLargeTextCellEditor"},
@@ -1700,6 +1730,7 @@ def manage_history(n_sel, n_all, selected, session):
         if not selected: return no_update, "Seleccion requerida."
         if db.delete_trade(selected[0]['id']):
             df = db.get_closed_trades(user)
+            df = add_pnl_pct(df)
             # Proteccion tabla vacia dentro del callback
             if not df.empty and 'exit_date' in df.columns:
                 df = df.sort_values('exit_date', ascending=True)
@@ -1728,6 +1759,12 @@ def update_analytics(start_bal, selected_metric, session):
     df_open = db.get_open_trades(session['user'])
     cash_movements_df = db.get_cash_movements(session['user'])
     return get_analytics_figures(df_closed, df_open, capital_final, session.get('config', {}), selected_metric, cash_movements_df)
+
+# --- CALLBACK TOGGLE $/% EN POSICIONES ACTIVAS ---
+@app.callback(Output('open-grid', 'columnDefs'), [Input('pnl-mode-toggle', 'value')], [State('session-store', 'data')], prevent_initial_call=True)
+def toggle_pnl_mode(mode, session):
+    conf = session.get('config', {}) if session else {}
+    return build_open_grid_cols(conf, mode or "$")
 
 # --- CALLBACK GRAFICO RIESGO LIVE ---
 @app.callback(Output("fig-live-risk", "figure"), [Input("live-chart-mode-selector", "value"), Input("open-grid", "rowData")], [State("session-store", "data")])
