@@ -12,10 +12,13 @@
    ═══════════════════════════════════════════════════════════════ */
 
 /* --- FONDO GENERAL Y TIPOGRAFÍA BASE --- */
+/* Esquema híbrido: Inter para la interfaz, JetBrains Mono para datos numéricos */
 body {
     background-color: #0B0E11 !important;
     color: #EAECEF;
     font-family: 'Inter', 'Segoe UI', sans-serif;
+    /* Cifras alineadas en columnas aunque estén en Inter */
+    font-variant-numeric: tabular-nums;
 }
 
 ::selection {
@@ -119,6 +122,13 @@ h1, h2, h3, h4, h5 {
     text-transform: uppercase;
     font-size: 0.75rem;
     letter-spacing: 0.5px;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+/* Celdas de datos en mono: precios, cantidades y PnL con carácter "quant" */
+.ag-cell {
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 0.82rem;
 }
 
 /* --- DROPDOWNS DE DASH (React-Select) --- */
