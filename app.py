@@ -83,7 +83,7 @@ KPI_CARD_STYLE = {
     "boxShadow": "0 4px 12px rgba(0,0,0,0.15)",
     "transition": "all 0.3s ease"
 }
-KPI_VAL_STYLE = {"fontSize": "1.25rem", "fontWeight": "bold", "color": TEXT_MAIN, "margin": "0", "fontFamily": "'JetBrains Mono', Consolas, monospace"}
+KPI_VAL_STYLE = {"fontSize": "1.25rem", "fontWeight": "bold", "color": TEXT_MAIN, "margin": "0", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}
 KPI_LBL_STYLE = {"fontSize": "0.70rem", "color": COLOR_NEUTRAL, "textTransform": "uppercase", "letterSpacing": "1px", "marginTop": "6px", "fontWeight": "bold", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}
 SCROLL_CONTAINER_STYLE = {"overflowX": "auto", "whiteSpace": "nowrap", "paddingBottom": "15px", "scrollbarWidth": "thin"}
 
@@ -686,7 +686,7 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
     empty = {"layout": {"xaxis": {"visible": False}, "yaxis": {"visible": False}, "plot_bgcolor": "rgba(0,0,0,0)", "paper_bgcolor": "rgba(0,0,0,0)",
                         "annotations": [{"text": "Sin datos — registrá tus primeros trades en OPERATIVA", "showarrow": False,
                                          "xref": "paper", "yref": "paper", "x": 0.5, "y": 0.5,
-                                         "font": {"color": COLOR_NEUTRAL, "family": "JetBrains Mono, Consolas, monospace", "size": 13}}]}}
+                                         "font": {"color": COLOR_NEUTRAL, "family": "Inter, Segoe UI, sans-serif", "size": 13}}]}}
     
     def style_fig(fig):
         fig.update_layout(
@@ -1015,7 +1015,7 @@ def layout_login():
     return html.Div(
         dbc.Card([
             dbc.CardBody([
-                html.H2("EDGE JOURNAL", className="text-center mb-1 fw-bold", style={"color": TEXT_MAIN, "letterSpacing": "3px", "fontFamily": "'JetBrains Mono', Consolas, monospace", "textShadow": f"0 0 24px {COLOR_POS}44"}),
+                html.H2("EDGE JOURNAL", className="text-center mb-1 fw-bold", style={"color": TEXT_MAIN, "letterSpacing": "3px", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "textShadow": f"0 0 24px {COLOR_POS}44"}),
                 html.P("Trading journal & analytics", className="text-center", style={"color": COLOR_NEUTRAL, "fontSize": "0.8rem", "letterSpacing": "1px", "marginBottom": "28px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
                 dbc.Input(id="user-in", placeholder="Usuario", className="mb-3 p-3", style=INPUT_STYLE),
                 dbc.Input(id="pass-in", placeholder="Password", type="password", className="mb-3 p-3", style=INPUT_STYLE),
@@ -1064,7 +1064,7 @@ app.layout = html.Div([
     dbc.Container([
         dbc.Row([
             # CAMBIO AQUI: Quitamos 'fw-bold' y agregamos 'fontWeight': 'normal'
-            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "fontFamily": "'JetBrains Mono', Consolas, monospace", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8),
+            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8),
             dbc.Col([
                 dbc.Button("CONFIG. ESTRATEGIA", id="open-config-btn", color="dark", className="me-3 fw-bold", style={"border": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), 
                 dbc.Button("SALIR", id="logout-btn", color="dark", outline=True, className="fw-bold", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": COLOR_NEUTRAL, "borderColor": BORDER_COLOR})
@@ -1099,10 +1099,12 @@ app.validation_layout = html.Div([
     dbc.Button(id="btn-del-cm"),
     html.Div(id="cm-msg"),
     # Componentes de diagnóstico de valuación
-    dcc.Graph(id="fig-perf-value"),
     dbc.Button(id="btn-export-daily"),
     dcc.Download(id="download-daily"),
     dcc.Store(id="perf-daily-store"),
+    # Collapse de aportes y retiros
+    dbc.Button(id="btn-toggle-cm"),
+    dbc.Collapse(id="collapse-cm"),
     # Toggle $/% de posiciones activas
     dbc.RadioItems(id="pnl-mode-toggle"),
     # Benchmark y moneda
@@ -1483,39 +1485,6 @@ def render_tab(tab, session):
                 ], width=2)
             ], style={"marginTop": "15px", "marginBottom": "20px"}),
 
-            # Tablero de aportes y retiros
-            dbc.Card([
-                dbc.CardHeader("APORTES Y RETIROS", style={"backgroundColor": "transparent", "borderBottom": f"1px solid {BORDER_COLOR}", "fontWeight": "bold", "color": TEXT_MAIN, "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
-                dbc.CardBody([
-                    dbc.Row([
-                        dbc.Col(dbc.Input(id="cm-date", type="date", value=date.today(), style=INPUT_STYLE), width=3),
-                        dbc.Col(dbc.Input(id="cm-amount", placeholder="Monto ($)", type="number", min=0, style=INPUT_STYLE), width=3),
-                        dbc.Col(dbc.Select(id="cm-type", options=[{"label": "APORTE", "value": "APORTE"}, {"label": "RETIRO", "value": "RETIRO"}], value="APORTE", style=INPUT_STYLE), width=3),
-                        dbc.Col(dbc.Button("AGREGAR", id="btn-add-cm", color="light", className="w-100 fw-bold text-dark", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif", "border": "none"}), width=3)
-                    ], className="mb-3"),
-                    dag.AgGrid(
-                        id="cash-movements-grid",
-                        columnDefs=[
-                            {"field": "id", "checkboxSelection": True, "width": 70},
-                            {"field": "movement_date", "headerName": "Fecha", "width": 130},
-                            {"field": "amount", "headerName": "Monto ($)", "width": 130},
-                            {"field": "movement_type", "headerName": "Tipo", "flex": 1, "cellStyle": {"styleConditions": [
-                                {"condition": "params.value=='APORTE'", "style": {"color": COLOR_POS}},
-                                {"condition": "params.value=='RETIRO'", "style": {"color": COLOR_NEG}}
-                            ]}}
-                        ],
-                        rowData=cm_data,
-                        dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 10},
-                        className="ag-theme-alpine-dark",
-                        style={"height": "220px", "width": "100%", **CUSTOM_GRID_STYLE}
-                    ),
-                    dbc.Row([
-                        dbc.Col(dbc.Button("ELIMINAR SELECCION", id="btn-del-cm", color="dark", size="sm", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif", "border": f"1px solid {BORDER_COLOR}"}), width="auto"),
-                        dbc.Col(html.Div(id="cm-msg", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "5px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), width="auto")
-                    ], className="mt-2")
-                ], style={"backgroundColor": CARD_BG})
-            ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)", "marginBottom": "25px"}),
-
             # Resultados con spinner mientras corre el cálculo de Performance
             dcc.Loading(id="loading-performance", type="default", color=COLOR_NEUTRAL, children=html.Div([
                 # KPIs resumen
@@ -1547,22 +1516,54 @@ def render_tab(tab, session):
                                                "font": {"color": COLOR_NEUTRAL}}}
                         )
                     ], width=12)
-                ], style={"marginTop": "10px"}),
-
-                # Gráfico terciario: Valor de cuenta vs contribuciones netas (estilo Schwab)
-                dbc.Row([
-                    dbc.Col([
-                        dcc.Graph(
-                            id="fig-perf-value",
-                            config={'displayModeBar': False},
-                            style={"height": "350px"},
-                            figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
-                                               "xaxis": {"visible": False}, "yaxis": {"visible": False},
-                                               "font": {"color": COLOR_NEUTRAL}}}
-                        )
-                    ], width=12)
                 ], style={"marginTop": "10px"})
-            ]))
+            ])),
+
+            # Tablero de aportes y retiros (colapsable, cerrado por default)
+            dbc.Card([
+                dbc.CardHeader(
+                    dbc.Button(
+                        "▸ APORTES Y RETIROS",
+                        id="btn-toggle-cm",
+                        color="link",
+                        className="p-0 text-decoration-none fw-bold",
+                        style={"color": TEXT_MAIN, "fontFamily": "'Inter', 'Segoe UI', sans-serif", "letterSpacing": "0.5px"}
+                    ),
+                    style={"backgroundColor": "transparent", "borderBottom": "none"}
+                ),
+                dbc.Collapse(
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col(dbc.Input(id="cm-date", type="date", value=date.today(), style=INPUT_STYLE), width=3),
+                            dbc.Col(dbc.Input(id="cm-amount", placeholder="Monto ($)", type="number", min=0, style=INPUT_STYLE), width=3),
+                            dbc.Col(dbc.Select(id="cm-type", options=[{"label": "APORTE", "value": "APORTE"}, {"label": "RETIRO", "value": "RETIRO"}], value="APORTE", style=INPUT_STYLE), width=3),
+                            dbc.Col(dbc.Button("AGREGAR", id="btn-add-cm", color="light", className="w-100 fw-bold text-dark", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif", "border": "none"}), width=3)
+                        ], className="mb-3"),
+                        dag.AgGrid(
+                            id="cash-movements-grid",
+                            columnDefs=[
+                                {"field": "id", "checkboxSelection": True, "width": 70},
+                                {"field": "movement_date", "headerName": "Fecha", "width": 130},
+                                {"field": "amount", "headerName": "Monto ($)", "width": 130},
+                                {"field": "movement_type", "headerName": "Tipo", "flex": 1, "cellStyle": {"styleConditions": [
+                                    {"condition": "params.value=='APORTE'", "style": {"color": COLOR_POS}},
+                                    {"condition": "params.value=='RETIRO'", "style": {"color": COLOR_NEG}}
+                                ]}}
+                            ],
+                            rowData=cm_data,
+                            dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 10},
+                            className="ag-theme-alpine-dark",
+                            style={"height": "220px", "width": "100%", **CUSTOM_GRID_STYLE}
+                        ),
+                        dbc.Row([
+                            dbc.Col(dbc.Button("ELIMINAR SELECCION", id="btn-del-cm", color="dark", size="sm", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif", "border": f"1px solid {BORDER_COLOR}"}), width="auto"),
+                            dbc.Col(html.Div(id="cm-msg", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "5px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), width="auto")
+                        ], className="mt-2")
+                    ], style={"backgroundColor": CARD_BG}),
+                    id="collapse-cm",
+                    is_open=False
+                )
+            ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)", "marginTop": "25px", "marginBottom": "25px"})
 
         ], fluid=True, style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "padding": "20px"})
     
@@ -2048,6 +2049,17 @@ def export_daily_series(n_clicks, store_data):
 
 BENCHMARK_NAMES = {"SPY": "SPY", "SPY.BA": "SPY CEDEAR", "^MERV": "MERVAL"}
 
+# --- CALLBACK COLLAPSE DE APORTES Y RETIROS ---
+@app.callback(
+    [Output("collapse-cm", "is_open"), Output("btn-toggle-cm", "children")],
+    Input("btn-toggle-cm", "n_clicks"),
+    State("collapse-cm", "is_open"),
+    prevent_initial_call=True
+)
+def toggle_cash_movements(n, is_open):
+    new_state = not is_open
+    return new_state, ("▾ APORTES Y RETIROS" if new_state else "▸ APORTES Y RETIROS")
+
 # --- CALLBACK RESALTADO DE PERÍODO ACTIVO ---
 @app.callback(
     [Output("btn-perf-ytd", "style"), Output("btn-perf-yoy", "style"),
@@ -2063,7 +2075,6 @@ def highlight_period_button(period):
     [
         Output("fig-perf-cumulative", "figure"),
         Output("fig-perf-drawdown", "figure"),
-        Output("fig-perf-value", "figure"),
         Output("perf-kpis-container", "children"),
         Output("perf-status", "children"),
         Output("perf-daily-store", "data"),
@@ -2114,11 +2125,11 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
     empty_fig.add_annotation(
         text="Sin datos para este período — registrá tus trades en OPERATIVA",
         showarrow=False, xref="paper", yref="paper", x=0.5, y=0.5,
-        font=dict(color=COLOR_NEUTRAL, family="JetBrains Mono, Consolas, monospace", size=13)
+        font=dict(color=COLOR_NEUTRAL, family="Inter, Segoe UI, sans-serif", size=13)
     )
 
     if not session:
-        return empty_fig, empty_fig, empty_fig, [], "⚠️ Sin sesión", None, period
+        return empty_fig, empty_fig, [], "⚠️ Sin sesión", None, period
 
     user = session['user']
 
@@ -2135,7 +2146,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
         initial_balance = 10000.0
 
     if initial_balance <= 0:
-        return empty_fig, empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics", None, period
+        return empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics", None, period
 
     # ── CACHE CHECK ──
     cache_key = f"{user}_{initial_balance}_{period}_{bench_ticker}_{sym}"
@@ -2156,7 +2167,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
     print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}, movimientos: {len(cash_movements_df)}")
 
     if df_closed.empty and df_open.empty:
-        return empty_fig, empty_fig, empty_fig, [], "⚠️ No hay trades para calcular", None, period
+        return empty_fig, empty_fig, [], "⚠️ No hay trades para calcular", None, period
     
     # ── FILTRAR POR PERIODO ──
     today = pd.Timestamp.now().normalize()
@@ -2222,7 +2233,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
         df_open_filtered = pd.DataFrame()
 
     if df_filtered.empty and df_open_filtered.empty:
-        return empty_fig, empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}", None, period
+        return empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}", None, period
 
     print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)} cerrados, {len(df_open_filtered)} abiertos")
     
@@ -2241,7 +2252,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
             daily_df = daily_df[daily_df['date'] >= pd.Timestamp(today.year, 1, 1)]
         elif period == "YOY":
             daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
-        if daily_df.empty: return empty_fig, empty_fig, empty_fig, [], "⚠️ Portfolio vacío", None, period
+        if daily_df.empty: return empty_fig, empty_fig, [], "⚠️ Portfolio vacío", None, period
         daily_df = daily_df.reset_index(drop=True)
         # Recalcular retorno acumulado desde el inicio del periodo (arranca en 0%)
         # encadenando los retornos diarios TWR (los aportes/retiros no afectan el %)
@@ -2270,7 +2281,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
             
     except Exception as e:
         import traceback; traceback.print_exc()
-        return empty_fig, empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", None, period
+        return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", None, period
     
     # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
@@ -2419,31 +2430,6 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
     fig_drawdown.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['drawdown_pct'], mode='lines', line=dict(color=COLOR_NEG, width=1.5), fill='tozeroy', fillcolor='rgba(246, 70, 93, 0.2)', name='Drawdown', hovertemplate='%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>'))
     fig_drawdown.update_layout(title={'text': 'DRAWDOWN (%)', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Inter, Segoe UI, sans-serif'}, 'x': 0.5, 'xanchor': 'center'}, paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="'Inter', 'Segoe UI', sans-serif", hovermode='x unified', margin=dict(l=60, r=30, t=40, b=30), yaxis=dict(title="DD (%)", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, ticksuffix='%'), xaxis=dict(title="Fecha", showgrid=False), showlegend=False)
     
-    # Gráfico valor de cuenta vs contribuciones netas (réplica de "Value vs. net
-    # contributions" de Schwab, para comparar la valuación día a día)
-    flows_after_day1 = daily_df['external_flow'].copy()
-    flows_after_day1.iloc[0] = 0.0
-    daily_df['net_contrib_line'] = period_start_value + flows_after_day1.cumsum()
-    fig_value = go.Figure()
-    fig_value.add_trace(go.Scatter(
-        x=daily_df['date'], y=daily_df['net_contrib_line'], mode='lines', name='Contribuciones Netas',
-        line=dict(color=COLOR_NEUTRAL, width=1, dash='dash'),
-        hovertemplate='%{x|%Y-%m-%d}<br>Contribuciones: ' + sym + '%{y:,.2f}<extra></extra>'
-    ))
-    fig_value.add_trace(go.Scatter(
-        x=daily_df['date'], y=daily_df['total_value'], mode='lines', name='Valor de Cuenta',
-        line=dict(color=COLOR_SPY, width=2), fill='tonexty', fillcolor='rgba(252, 213, 53, 0.08)',
-        hovertemplate='%{x|%Y-%m-%d}<br>Valor: ' + sym + '%{y:,.2f}<extra></extra>'
-    ))
-    fig_value.update_layout(
-        title={'text': f'VALOR DE CUENTA VS CONTRIBUCIONES NETAS ({sym})', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Inter, Segoe UI, sans-serif'}, 'x': 0.5, 'xanchor': 'center'},
-        paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="'Inter', 'Segoe UI', sans-serif",
-        hovermode='x unified', margin=dict(l=60, r=30, t=40, b=30),
-        yaxis=dict(title=f"Valor ({sym})", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, tickprefix=sym, tickformat=",.0f"),
-        xaxis=dict(title="Fecha", showgrid=False),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-    )
-
     # Serie diaria para exportar (diagnóstico de valuación vs broker)
     export_cols = ['date', 'total_value', 'cash', 'equity_value', 'external_flow', 'daily_return', 'cumulative_return']
     store_df = daily_df[export_cols].copy()
@@ -2454,7 +2440,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_pe
     status = f"✓ {period_label} | {len(df_filtered)} cerrados + {open_count} abiertos | {len(daily_df)} días | Retorno: {total_return:+.2f}%"
     print(f"[PERF] ✅ {status}")
 
-    result = (fig_cumulative, fig_drawdown, fig_value, kpis_layout, status, store_data, period)
+    result = (fig_cumulative, fig_drawdown, kpis_layout, status, store_data, period)
     _perf_cache[cache_key] = result; _perf_cache_time[cache_key] = now
     return result
 
