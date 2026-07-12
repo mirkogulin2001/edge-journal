@@ -897,13 +897,39 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         if selected_metric and selected_metric in df_closed:
             g = df_closed.groupby(selected_metric)
             pnl = g['pnl'].sum().reset_index(); cnt = g.size().reset_index(name='count')
+
+            # Estilo sombreado (mismo look que el gráfico de exposición de Operativa)
+            a_sym = cur_sym(user_config)
+            a_fmt = lambda v: f"-{a_sym}{abs(v):,.0f}" if v < 0 else f"{a_sym}{v:,.0f}"
+            a_label_font = dict(color=TEXT_MAIN, size=11, family="'Inter', 'Segoe UI', sans-serif")
+
             fig_s = px.bar(pnl, x=selected_metric, y='pnl', title=f'PNL POR {str(selected_metric).upper()}', template='plotly_dark')
-            fig_s.update_traces(marker_color=np.where(pnl['pnl']>=0, COLOR_POS, COLOR_NEG), marker_line_color=CARD_BG, marker_line_width=1)
+            fig_s.update_traces(
+                marker=dict(
+                    color=np.where(pnl['pnl'] >= 0, "rgba(0, 176, 189, 0.4)", "rgba(246, 70, 93, 0.4)"),
+                    line=dict(color=np.where(pnl['pnl'] >= 0, COLOR_POS, COLOR_NEG), width=1.5),
+                    cornerradius=6
+                ),
+                text=pnl['pnl'].apply(a_fmt),
+                textposition='outside', textfont=a_label_font, cliponaxis=False,
+                hovertemplate='%{x}<br>' + a_sym + '%{y:,.2f}<extra></extra>'
+            )
             fig_s = style_fig(fig_s)
+            fig_s.update_layout(bargap=0.35, yaxis=dict(showgrid=True, gridcolor="rgba(43, 49, 57, 0.5)", zerolinecolor=BORDER_COLOR, tickprefix=a_sym, tickformat=",.0f", title=None))
 
             fig_c = px.bar(cnt, x=selected_metric, y='count', title=f'TRADES POR {str(selected_metric).upper()}', template='plotly_dark')
-            fig_c.update_traces(marker_color=COLOR_NEUTRAL, marker_line_color=CARD_BG, marker_line_width=1)
+            fig_c.update_traces(
+                marker=dict(
+                    color="rgba(132, 142, 156, 0.35)",
+                    line=dict(color=COLOR_NEUTRAL, width=1.5),
+                    cornerradius=6
+                ),
+                text=cnt['count'],
+                textposition='outside', textfont=a_label_font, cliponaxis=False,
+                hovertemplate='%{x}<br>%{y} trades<extra></extra>'
+            )
             fig_c = style_fig(fig_c)
+            fig_c.update_layout(bargap=0.35, yaxis=dict(showgrid=True, gridcolor="rgba(43, 49, 57, 0.5)", zerolinecolor=BORDER_COLOR, title=None))
         else: fig_s = fig_c = empty
         
         def make_card(val, label, color=None):
@@ -1857,7 +1883,7 @@ def update_live_risk_chart(mode, rows, session):
         total_pnl = df['unrealized_pnl'].sum()
         total_risk = df['open_risk'].sum()
 
-        x_cats = ['PNL LATENTE', 'RIESGO VIVO']
+        x_cats = ['PNL NO REALIZADO', 'RIESGO ACTUAL']
         fig.add_trace(go.Bar(
             x=x_cats,
             y=[total_pnl, total_risk],
@@ -1880,7 +1906,7 @@ def update_live_risk_chart(mode, rows, session):
         pnl_fill = np.where(df_grouped['unrealized_pnl'] >= 0, POS_FILL, NEG_FILL)
         pnl_line = np.where(df_grouped['unrealized_pnl'] >= 0, POS_LINE, NEG_LINE)
         fig.add_trace(go.Bar(
-            name='PnL Latente',
+            name='PnL No Realizado',
             x=df_grouped['symbol'],
             y=df_grouped['unrealized_pnl'],
             marker=dict(color=pnl_fill, line=dict(color=pnl_line, width=1.5), cornerradius=4),
@@ -1890,7 +1916,7 @@ def update_live_risk_chart(mode, rows, session):
         ))
 
         fig.add_trace(go.Bar(
-            name='Riesgo Vivo',
+            name='Riesgo Actual',
             x=df_grouped['symbol'],
             y=df_grouped['open_risk'],
             marker=dict(color=RISK_FILL, line=dict(color=NEG_LINE, width=1.5), cornerradius=4),
