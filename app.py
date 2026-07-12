@@ -1314,7 +1314,7 @@ def render_tab(tab, session):
                 html.Div(dag.AgGrid(id="open-grid", rowData=format_df(df, conf), columnDefs=cols, dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 10}, className="ag-theme-alpine-dark", style={"height": "350px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"}),
                 html.Hr(style={"borderColor": BORDER_COLOR, "margin": "30px 0"}),
                 dbc.Row([
-                    dbc.Col(html.H5("EXPOSICION LIVE", className="fw-bold mb-3", style={"color": TEXT_MAIN}), width=8),
+                    dbc.Col(html.H5("EXPOSICION ACTUAL", className="fw-bold mb-3", style={"color": TEXT_MAIN}), width=8),
                     dbc.Col(dcc.Dropdown(id='live-chart-mode-selector', options=[{'label': 'TOTAL PORTFOLIO', 'value': 'TOTAL'}, {'label': 'POR ACTIVO', 'value': 'SYMBOL'}], value='TOTAL', clearable=False, style=DROPDOWN_STYLE), width=4)
                 ]),
                 html.Div(dcc.Graph(id="fig-live-risk", style={'height': '300px'}), style={"borderRadius": "4px", "overflow": "hidden", "border": f"1px solid {BORDER_COLOR}", "boxShadow": "0 4px 12px rgba(0,0,0,0.15)"})
@@ -1367,7 +1367,7 @@ def render_tab(tab, session):
         
         return html.Div([
             dbc.Row([
-                dbc.Col(html.H3("METRICAS DE SISTEMA", className="fw-bold", style={"color": TEXT_MAIN}), width=9), 
+                dbc.Col(html.H4("METRICAS DE SISTEMA", style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), width=9),
                 dbc.Col(dbc.InputGroup([dbc.InputGroupText(f"CAPITAL INICIAL ({cur_sym(conf)})", style={"backgroundColor": BORDER_COLOR, "color": COLOR_NEUTRAL, "border": "none", "fontWeight": "bold", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "fontSize": "12px"}), dbc.Input(id="initial-balance-input", type="number", value=saved_bal, debounce=True, style=INPUT_STYLE)]), width=3)
             ], className="mb-4 align-items-center"),
             dcc.Loading(id="loading-analytics", type="default", color=COLOR_NEUTRAL, children=html.Div([
@@ -1398,7 +1398,7 @@ def render_tab(tab, session):
     elif tab == 'tab-montecarlo':
         return html.Div([
             dbc.Row([
-                dbc.Col([html.H3("Simulador de Montecarlo", className="fw-bold",style={"color": TEXT_MAIN}), html.P("Generador de escenarios  basado en distr. de R.", className="text-muted"), html.P("Se recomienda un mínimo de 50/100 operaciones para realizar la simulación.", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginTop": "-8px"})], width=6),
+                dbc.Col([html.H4("SIMULADOR DE MONTECARLO", style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), html.P("Generador de escenarios  basado en distr. de R.", className="text-muted"), html.P("Se recomienda un mínimo de 50/100 operaciones para realizar la simulación.", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginTop": "-8px"})], width=6),
                 dbc.Col([dbc.Label("N° Iteraciones", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-n-sim", type="number", value=3000, min=100, max=10000, style=INPUT_STYLE)], width=3),
                 dbc.Col([dbc.Label("Kelly Fraction (f*)", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-kelly-frac", type="number", value=1.0, min=0.1, max=2.0, step=0.01, style=INPUT_STYLE)], width=3),
             ], className="mb-4 align-items-center"),
@@ -1839,53 +1839,79 @@ def update_live_risk_chart(mode, rows, session):
     for col in ['unrealized_pnl', 'open_risk']:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
+    sym = cur_sym(session.get('config', {}))
+
+    def fmt_money(v):
+        return f"-{sym}{abs(v):,.0f}" if v < 0 else f"{sym}{v:,.0f}"
+
+    # Look "sombreado": relleno semitransparente + borde sólido del mismo color
+    POS_FILL, POS_LINE = "rgba(0, 176, 189, 0.4)", COLOR_POS
+    NEG_FILL, NEG_LINE = "rgba(246, 70, 93, 0.4)", COLOR_NEG
+    RISK_FILL = "rgba(246, 70, 93, 0.15)"  # riesgo más tenue para no confundir con PnL negativo
+    LABEL_FONT = dict(color=TEXT_MAIN, size=11, family="'Inter', 'Segoe UI', sans-serif")
+
     fig = go.Figure()
+    show_legend = False
 
     if mode == 'TOTAL':
         total_pnl = df['unrealized_pnl'].sum()
         total_risk = df['open_risk'].sum()
-        
+
         x_cats = ['PNL LATENTE', 'RIESGO VIVO']
         fig.add_trace(go.Bar(
             x=x_cats,
             y=[total_pnl, total_risk],
-            marker_color=[COLOR_POS if total_pnl >= 0 else COLOR_NEG, COLOR_NEG],
-            text=[f"${total_pnl:,.0f}", f"${total_risk:,.0f}"],
-            textposition='auto',
+            marker=dict(
+                color=[POS_FILL if total_pnl >= 0 else NEG_FILL, RISK_FILL],
+                line=dict(color=[POS_LINE if total_pnl >= 0 else NEG_LINE, NEG_LINE], width=1.5),
+                cornerradius=6
+            ),
+            text=[fmt_money(total_pnl), fmt_money(total_risk)],
+            textposition='outside', textfont=LABEL_FONT, cliponaxis=False,
+            hovertemplate='%{x}<br>' + sym + '%{y:,.2f}<extra></extra>'
         ))
-    
-    else: 
+        fig.update_layout(bargap=0.45)
+
+    else:
         df_grouped = df.groupby('symbol')[['unrealized_pnl', 'open_risk']].sum().reset_index()
-        x_cats = sorted(df_grouped['symbol'].tolist()) 
-        
+        x_cats = sorted(df_grouped['symbol'].tolist())
+        show_legend = True
+
+        pnl_fill = np.where(df_grouped['unrealized_pnl'] >= 0, POS_FILL, NEG_FILL)
+        pnl_line = np.where(df_grouped['unrealized_pnl'] >= 0, POS_LINE, NEG_LINE)
         fig.add_trace(go.Bar(
             name='PnL Latente',
             x=df_grouped['symbol'],
             y=df_grouped['unrealized_pnl'],
-            marker_color=np.where(df_grouped['unrealized_pnl'] >= 0, COLOR_POS, COLOR_NEG),
-            text=df_grouped['unrealized_pnl'].apply(lambda val: f"${val:,.0f}"),
-            textposition='auto'
+            marker=dict(color=pnl_fill, line=dict(color=pnl_line, width=1.5), cornerradius=4),
+            text=df_grouped['unrealized_pnl'].apply(fmt_money),
+            textposition='outside', textfont=LABEL_FONT, cliponaxis=False,
+            hovertemplate='%{x} · PnL: ' + sym + '%{y:,.2f}<extra></extra>'
         ))
 
         fig.add_trace(go.Bar(
             name='Riesgo Vivo',
             x=df_grouped['symbol'],
             y=df_grouped['open_risk'],
-            marker_color=COLOR_NEG,
-            text=df_grouped['open_risk'].apply(lambda val: f"${val:,.0f}"),
-            textposition='auto'
+            marker=dict(color=RISK_FILL, line=dict(color=NEG_LINE, width=1.5), cornerradius=4),
+            text=df_grouped['open_risk'].apply(fmt_money),
+            textposition='outside', textfont=LABEL_FONT, cliponaxis=False,
+            hovertemplate='%{x} · Riesgo: ' + sym + '%{y:,.2f}<extra></extra>'
         ))
-        fig.update_layout(barmode='group')
+        fig.update_layout(barmode='group', bargap=0.3, bargroupgap=0.15)
 
     fig.update_layout(
-        paper_bgcolor=CARD_BG, 
-        plot_bgcolor=CARD_BG, 
+        paper_bgcolor=CARD_BG,
+        plot_bgcolor=CARD_BG,
         font_color=TEXT_MAIN,
         font_family="'Inter', 'Segoe UI', sans-serif",
-        margin=dict(l=20, r=20, t=20, b=20),
-        yaxis=dict(showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, title="USD"),
-        xaxis=dict(showgrid=False, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, type='category', categoryarray=x_cats),
-        showlegend=False,
+        margin=dict(l=20, r=20, t=30, b=20),
+        yaxis=dict(showgrid=True, gridcolor="rgba(43, 49, 57, 0.5)", zerolinecolor=BORDER_COLOR,
+                   tickprefix=sym, tickformat=",.0f"),
+        xaxis=dict(showgrid=False, zerolinecolor=BORDER_COLOR, type='category', categoryarray=x_cats),
+        showlegend=show_legend,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                    font=dict(size=11, color=COLOR_NEUTRAL)),
         height=300
     )
     return fig
