@@ -116,6 +116,13 @@ INPUT_STYLE = {"backgroundColor": BG_COLOR, "color": TEXT_MAIN, "border": f"1px 
 DROPDOWN_STYLE = {"backgroundColor": BG_COLOR, "color": "#000", "border": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas, monospace"}
 
 # --- UTILS ---
+# Claves del config JSON que no son parámetros de estrategia
+RESERVED_CONFIG_KEYS = {'initial_balance', 'currency'}
+
+def cur_sym(conf):
+    """Símbolo de moneda de la cuenta según config ('ARS' → AR$, default US$ → $)."""
+    return "AR$" if isinstance(conf, dict) and conf.get('currency') == 'ARS' else "$"
+
 def format_df(df, user_config):
     if df.empty: return []
     if 'initial_quantity' not in df.columns and 'quantity' in df.columns: df['initial_quantity'] = df['quantity']
@@ -129,7 +136,7 @@ def format_df(df, user_config):
     
     if isinstance(user_config, dict):
         for param in user_config.keys():
-            if param != 'initial_balance':
+            if param not in RESERVED_CONFIG_KEYS:
                 df[param] = df['tags'].apply(lambda x: (x or {}).get(param, "-"))
     return df.to_dict("records")
 
@@ -696,7 +703,7 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
 
         if isinstance(user_config, dict):
             for k in user_config:
-                if k != 'initial_balance':
+                if k not in RESERVED_CONFIG_KEYS:
                     df_closed[k] = df_closed['tags'].apply(lambda x: (x or {}).get(k, "-"))
         
         df_closed['cum'] = df_closed['pnl'].cumsum()
@@ -896,7 +903,7 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
             return dbc.Col(html.Div([html.P(val, style=val_s), html.P(label, style=KPI_LBL_STYLE)], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
         
         kpis = html.Div(dbc.Row([
-            make_card(f"${total_pnl:,.0f}", "PNL", COLOR_POS if total_pnl>=0 else COLOR_NEG),
+            make_card(f"{cur_sym(user_config)}{total_pnl:,.0f}", "PNL", COLOR_POS if total_pnl>=0 else COLOR_NEG),
             make_card(f"{len(df_closed)}", "TRADES"), 
             make_card(f"{n_wins}", "WINS", COLOR_POS), 
             make_card(f"{n_losses}", "LOSSES", COLOR_NEG), 
@@ -907,7 +914,7 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
             make_card(f"{ratio_money:.2f}", "RISK REWARD ($) AVG HISTORICO"), 
             make_card(f"{ratio_r:.2f}", "RISK REWARD (RR) AVG HISTORICO"),
             make_card(f"{exp_abs:.2f}", "E(x)"),
-            make_card(f"${exp_money:.2f}", "E(x)($)"),
+            make_card(f"{cur_sym(user_config)}{exp_money:.2f}", f"E(x)({cur_sym(user_config)})"),
             make_card(f"{exp_r:.2f}R", "E(x)(RR)"),
             # ---------------------------------
             make_card(f"{max_dd:.2f}%", "MAX DD", COLOR_NEG),
@@ -936,11 +943,6 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
     else: fig_pie=empty
 
     return fig_eq, fig_dd, fig_pie, fig_edge, fig_h, kpis, fig_s, fig_c, fig_evo_winrate, fig_evo_ratio
-# --- SHELL Y MODALES ---
-global_modals = html.Div([
-    dbc.Modal([dbc.ModalHeader("REGISTRO DE USUARIO", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), dbc.ModalBody([dbc.Input(id="reg-u", placeholder="Usuario", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-p", placeholder="Contraseña", type="password", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-n", placeholder="Nombre Completo", style=INPUT_STYLE), html.Div(id="reg-msg", className="text-danger mt-2")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-reg", color="dark", className="ms-auto", style={"fontFamily": "Consolas"}), dbc.Button("ACEPTAR", id="do-reg", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "Consolas", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-reg", is_open=False),
-    dbc.Modal([dbc.ModalHeader("CONFIGURACION DE ESTRATEGIA", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), dbc.ModalBody([html.P("Definí parámetros para clasificar cada operación según el motivo por el cual fue tomada (ej: Trend Following, Buy & Hold, Swing Trading). Esto permite distinguir los trades entre las distintas variantes de operatoria y analizar el desempeño de cada una por separado en la pestaña de Analytics. (Ej: Parámetro: Trend Following — Opciones: MA Crossover, ATH, BreakOut)", style={"color": COLOR_NEUTRAL, "fontSize": "0.82rem", "fontFamily": "Consolas", "marginBottom": "15px"}), dag.AgGrid(id="conf-grid", columnDefs=[{"field": "Parametro", "editable": True}, {"field": "Opciones", "editable": True, "flex": 1}], rowData=[], dashGridOptions={"rowSelection": "single", "stopEditingWhenCellsLoseFocus": True}, className="ag-theme-alpine-dark", style={"height": "300px", "borderRadius": "4px", **CUSTOM_GRID_STYLE}), dbc.Button("AGREGAR PARAMETRO", id="add-row-btn", color="dark", outline=True, size="sm", className="mt-3 w-100", style={"fontFamily": "Consolas"}), html.Div(id="config-feedback", className="mt-2 text-warning small")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-config", color="dark", className="ms-auto", style={"fontFamily": "Consolas"}), dbc.Button("GUARDAR", id="save-config", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "Consolas", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-config", is_open=False, size="lg")
-])
 # --- PANEL DE GESTION DINAMICO (MOVIDO ARRIBA PARA QUE LO LEA EL LAYOUT) ---
 def get_management_panel():
     return html.Div(id="management-container", style={'display': 'none'}, children=[
@@ -997,7 +999,7 @@ def get_management_panel():
 # --- SHELL Y MODALES ---
 global_modals = html.Div([
     dbc.Modal([dbc.ModalHeader("REGISTRO DE USUARIO", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), dbc.ModalBody([dbc.Input(id="reg-u", placeholder="Usuario", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-p", placeholder="Contraseña", type="password", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-n", placeholder="Nombre Completo", style=INPUT_STYLE), html.Div(id="reg-msg", className="text-danger mt-2")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-reg", color="dark", className="ms-auto", style={"fontFamily": "Consolas"}), dbc.Button("ACEPTAR", id="do-reg", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "Consolas", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-reg", is_open=False),
-    dbc.Modal([dbc.ModalHeader("CONFIGURACION DE ESTRATEGIA", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), dbc.ModalBody([html.P("Definí parámetros para clasificar cada operación según el motivo por el cual fue tomada (ej: Trend Following, Buy & Hold, Swing Trading). Esto permite distinguir los trades entre las distintas variantes de operatoria y analizar el desempeño de cada una por separado en la pestaña de Analytics. (Ej: Parámetro: Trend Following — Opciones: MA Crossover, ATH, BreakOut)", style={"color": COLOR_NEUTRAL, "fontSize": "0.82rem", "fontFamily": "Consolas", "marginBottom": "15px"}), dag.AgGrid(id="conf-grid", columnDefs=[{"field": "Parametro", "editable": True}, {"field": "Opciones", "editable": True, "flex": 1}], rowData=[], dashGridOptions={"rowSelection": "single", "stopEditingWhenCellsLoseFocus": True}, className="ag-theme-alpine-dark", style={"height": "300px", "borderRadius": "4px", **CUSTOM_GRID_STYLE}), dbc.Button("AGREGAR PARAMETRO", id="add-row-btn", color="dark", outline=True, size="sm", className="mt-3 w-100", style={"fontFamily": "Consolas"}), html.Div(id="config-feedback", className="mt-2 text-warning small")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-config", color="dark", className="ms-auto", style={"fontFamily": "Consolas"}), dbc.Button("GUARDAR", id="save-config", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "Consolas", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-config", is_open=False, size="lg")
+    dbc.Modal([dbc.ModalHeader("CONFIGURACION DE ESTRATEGIA", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "Consolas"}), dbc.ModalBody([html.P("Definí parámetros para clasificar cada operación según el motivo por el cual fue tomada (ej: Trend Following, Buy & Hold, Swing Trading). Esto permite distinguir los trades entre las distintas variantes de operatoria y analizar el desempeño de cada una por separado en la pestaña de Analytics. (Ej: Parámetro: Trend Following — Opciones: MA Crossover, ATH, BreakOut)", style={"color": COLOR_NEUTRAL, "fontSize": "0.82rem", "fontFamily": "Consolas", "marginBottom": "15px"}), dag.AgGrid(id="conf-grid", columnDefs=[{"field": "Parametro", "editable": True}, {"field": "Opciones", "editable": True, "flex": 1}], rowData=[], dashGridOptions={"rowSelection": "single", "stopEditingWhenCellsLoseFocus": True}, className="ag-theme-alpine-dark", style={"height": "300px", "borderRadius": "4px", **CUSTOM_GRID_STYLE}), dbc.Button("AGREGAR PARAMETRO", id="add-row-btn", color="dark", outline=True, size="sm", className="mt-3 w-100", style={"fontFamily": "Consolas"}), html.Hr(style={"borderColor": BORDER_COLOR}), dbc.Row([dbc.Col(dbc.Label("MONEDA DE LA CUENTA", className="fw-bold", style={"color": COLOR_NEUTRAL, "fontSize": "0.8rem", "fontFamily": "Consolas", "paddingTop": "8px"}), width=6), dbc.Col(dbc.Select(id="conf-currency", options=[{"label": "Dólar (US$)", "value": "USD"}, {"label": "Peso Argentino (AR$)", "value": "ARS"}], value="USD", style=INPUT_STYLE), width=6)]), html.P("Define el símbolo de los valores en toda la app. Para cuentas en pesos usá tickers de BYMA/CEDEARs con sufijo .BA (ej: GGAL.BA, AAPL.BA).", style={"color": COLOR_NEUTRAL, "fontSize": "0.75rem", "fontFamily": "Consolas", "marginTop": "8px", "marginBottom": "0"}), html.Div(id="config-feedback", className="mt-2 text-warning small")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-config", color="dark", className="ms-auto", style={"fontFamily": "Consolas"}), dbc.Button("GUARDAR", id="save-config", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "Consolas", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-config", is_open=False, size="lg")
 ])
 
 def layout_login():
@@ -1073,6 +1075,10 @@ app.validation_layout = html.Div([
     dcc.Store(id="perf-daily-store"),
     # Toggle $/% de posiciones activas
     dbc.RadioItems(id="pnl-mode-toggle"),
+    # Benchmark y moneda
+    dbc.Select(id="benchmark-selector"),
+    dcc.Store(id="perf-period-store"),
+    dbc.Select(id="conf-currency"),
 ])
 # --- CALLBACKS CORE ---
 @app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
@@ -1165,35 +1171,36 @@ def process_reg(n_close, n_do, user, password, name):
         return (False, "") if success else (True, msg)
     return no_update, no_update
 
-@app.callback([Output("modal-config", "is_open"), Output("conf-grid", "rowData"), Output("session-store", "data", allow_duplicate=True), Output("config-feedback", "children")], [Input("open-config-btn", "n_clicks"), Input("close-config", "n_clicks"), Input("save-config", "n_clicks"), Input("add-row-btn", "n_clicks")], [State("modal-config", "is_open"), State("conf-grid", "rowData"), State("session-store", "data")], prevent_initial_call=True)
-def config_modal(n1, n2, n3, n4, is_open, rows, session):
-    if not session: return False, [], no_update, ""
+@app.callback([Output("modal-config", "is_open"), Output("conf-grid", "rowData"), Output("session-store", "data", allow_duplicate=True), Output("config-feedback", "children"), Output("conf-currency", "value")], [Input("open-config-btn", "n_clicks"), Input("close-config", "n_clicks"), Input("save-config", "n_clicks"), Input("add-row-btn", "n_clicks")], [State("modal-config", "is_open"), State("conf-grid", "rowData"), State("conf-currency", "value"), State("session-store", "data")], prevent_initial_call=True)
+def config_modal(n1, n2, n3, n4, is_open, rows, currency, session):
+    if not session: return False, [], no_update, "", no_update
     if ctx.triggered_id == "open-config-btn":
-        data = [{"Parametro": k, "Opciones": ", ".join(v) if isinstance(v, list) else str(v)} for k, v in session.get('config', {}).items() if k != 'initial_balance']
-        return True, data, no_update, ""
-    if ctx.triggered_id == "add-row-btn": 
-        return True, (rows or []) + [{"Parametro": "", "Opciones": ""}], no_update, ""
+        data = [{"Parametro": k, "Opciones": ", ".join(v) if isinstance(v, list) else str(v)} for k, v in session.get('config', {}).items() if k not in RESERVED_CONFIG_KEYS]
+        return True, data, no_update, "", session.get('config', {}).get('currency', 'USD')
+    if ctx.triggered_id == "add-row-btn":
+        return True, (rows or []) + [{"Parametro": "", "Opciones": ""}], no_update, "", no_update
     if ctx.triggered_id == "save-config":
         new_conf = {}
         if rows:
             for r in rows:
                 param_raw = r.get("Parametro")
                 param = str(param_raw).strip() if param_raw else ""
-                
+
                 opts_raw = r.get("Opciones")
                 opts_str = str(opts_raw) if opts_raw else ""
-                
-                if param: 
+
+                if param:
                     opts_list = [x.strip() for x in opts_str.split(",") if x.strip()]
                     new_conf[param] = opts_list
-        
-        if 'initial_balance' in session.get('config', {}): 
+
+        if 'initial_balance' in session.get('config', {}):
             new_conf['initial_balance'] = session['config']['initial_balance']
-            
+        new_conf['currency'] = currency or 'USD'
+
         db.update_user_config(session['user'], new_conf)
         session['config'] = new_conf
-        return False, no_update, session, ""
-    return False, no_update, no_update, ""
+        return False, no_update, session, "", no_update
+    return False, no_update, no_update, "", no_update
 
 @app.callback(Output('session-store', 'data', allow_duplicate=True), [Input('initial-balance-input', 'value')], [State('session-store', 'data')], prevent_initial_call=True)
 def save_balance_change(bal, session):
@@ -1209,12 +1216,12 @@ def save_balance_change(bal, session):
 def build_open_grid_cols(conf, mode="$"):
     """Columnas del grid de posiciones activas. mode '$' muestra PnL/Riesgo en
     valor absoluto; mode '%' los muestra en porcentaje sobre el costo de la posición."""
-    dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k != 'initial_balance'] if isinstance(conf, dict) else []
+    dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k not in RESERVED_CONFIG_KEYS] if isinstance(conf, dict) else []
     if mode == "%":
         pnl_col = {"field": "unrealized_pnl_pct", "headerName": "PnL (%)", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
         risk_col = {"field": "open_risk_pct", "headerName": "Riesgo (%)", "width": 90, "cellStyle": {'color': COLOR_NEG}}
     else:
-        pnl_col = {"field": "unrealized_pnl", "headerName": "PnL ($)", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
+        pnl_col = {"field": "unrealized_pnl", "headerName": f"PnL ({cur_sym(conf)})", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
         risk_col = {"field": "open_risk", "headerName": "Riesgo", "width": 90, "cellStyle": {'color': COLOR_NEG}}
     return [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 70}] + dyn_cols + [{"field": "entry_price", "headerName": "In", "width": 90}, {"field": "current_price", "headerName": "Live", "width": 90, "cellStyle": {'fontWeight': 'bold'}}, pnl_col, risk_col, {"field": "current_stop_loss", "headerName": "SL Act", "width": 90, "editable": True, "cellStyle": {'color': TEXT_MAIN, 'fontWeight': 'bold', 'backgroundColor': '#2B3139'}}]
 
@@ -1231,7 +1238,7 @@ def render_tab(tab, session):
             dyn_inputs.append(html.Hr(style={"borderColor": BORDER_COLOR}))
             row = []
             for p, opts in conf.items():
-                if p != 'initial_balance' and isinstance(opts, list): 
+                if p not in RESERVED_CONFIG_KEYS and isinstance(opts, list): 
                     row.append(dbc.Col([dbc.Label(p, className="small fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Select(id={'type': 'strat-input', 'index': p}, options=[{"label": str(o), "value": str(o)} for o in opts], style=INPUT_STYLE)], width=3, className="mb-3"))
             for i in range(0, len(row), 4): dyn_inputs.append(dbc.Row(row[i:i+4]))
         
@@ -1292,7 +1299,7 @@ def render_tab(tab, session):
         else:
             df['visual_id'] = []
             
-        dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k != 'initial_balance'] if isinstance(conf, dict) else []
+        dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k not in RESERVED_CONFIG_KEYS] if isinstance(conf, dict) else []
         cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "visual_id", "headerName": "#", "width": 60, "sortable": True}, {"field": "entry_date", "width": 100}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 80}, {"field": "result_type", "width": 70}, {"field": "entry_price", "width": 90}, {"field": "exit_price", "width": 90}, {"field": "initial_stop_loss", "width": 80}, {"field": "current_stop_loss", "width": 80}] + dyn_cols + [{"field": "rr", "headerName": "R", "width": 80}, {"field": "pnl", "headerName": "PnL", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, {"field": "pnl_pct", "headerName": "PnL %", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}},
                 # --- NOTAS ---
                 {"field": "entry_notes", "headerName": "Notas Entrada", "width": 200, "editable": True, "cellEditor": "agLargeTextCellEditor"},
@@ -1321,14 +1328,14 @@ def render_tab(tab, session):
         ])
 
     elif tab == 'tab-analytics':
-        strategy_options = [{"label": k, "value": k} for k in conf.keys() if k != 'initial_balance'] if isinstance(conf, dict) else []
+        strategy_options = [{"label": k, "value": k} for k in conf.keys() if k not in RESERVED_CONFIG_KEYS] if isinstance(conf, dict) else []
         default_val = strategy_options[0]['value'] if strategy_options else None
         saved_bal = conf.get('initial_balance', 10000)
         
         return html.Div([
             dbc.Row([
                 dbc.Col(html.H3("METRICAS DE SISTEMA", className="fw-bold", style={"color": TEXT_MAIN}), width=9), 
-                dbc.Col(dbc.InputGroup([dbc.InputGroupText("CAPITAL INICIAL", style={"backgroundColor": BORDER_COLOR, "color": COLOR_NEUTRAL, "border": "none", "fontWeight": "bold", "fontFamily": "Consolas", "fontSize": "12px"}), dbc.Input(id="initial-balance-input", type="number", value=saved_bal, debounce=True, style=INPUT_STYLE)]), width=3)
+                dbc.Col(dbc.InputGroup([dbc.InputGroupText(f"CAPITAL INICIAL ({cur_sym(conf)})", style={"backgroundColor": BORDER_COLOR, "color": COLOR_NEUTRAL, "border": "none", "fontWeight": "bold", "fontFamily": "Consolas", "fontSize": "12px"}), dbc.Input(id="initial-balance-input", type="number", value=saved_bal, debounce=True, style=INPUT_STYLE)]), width=3)
             ], className="mb-4 align-items-center"),
             dcc.Loading(id="loading-analytics", type="default", color=COLOR_NEUTRAL, children=html.Div([
                 html.Div(id="kpi-container", className="mb-4"),
@@ -1390,7 +1397,7 @@ def render_tab(tab, session):
                                style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "Consolas, monospace"}))
             ]),
             
-            # Controles: 3 botones de periodo + indicador de capital
+            # Controles: botones de periodo + benchmark + indicador de capital
             dbc.Row([
                 dbc.Col([
                     html.Label("Período:", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "marginBottom": "5px", "display": "block"}),
@@ -1402,18 +1409,33 @@ def render_tab(tab, session):
                         dbc.Button("ALL DATA", id="btn-perf-all", color="dark", outline=True, size="sm",
                                    style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),
                         dbc.Button("2025", id="btn-perf-2025", color="dark", outline=True, size="sm",
-                                   style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),                    
+                                   style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}),
                     ], size="sm")
-                ], width=4),
-                
+                ], width=3),
+
+                dbc.Col([
+                    html.Label("Benchmark:", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "marginBottom": "5px", "display": "block"}),
+                    dbc.Select(
+                        id="benchmark-selector",
+                        options=[
+                            {"label": "SPY (US$)", "value": "SPY"},
+                            {"label": "SPY CEDEAR (AR$)", "value": "SPY.BA"},
+                            {"label": "MERVAL (AR$)", "value": "^MERV"}
+                        ],
+                        value="SPY.BA" if conf.get('currency') == 'ARS' else "SPY",
+                        size="sm",
+                        style=INPUT_STYLE
+                    )
+                ], width=2),
+
                 dbc.Col([
                     html.Div([
                         html.Span("Capital Inicial: ", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace"}),
-                        html.Span(f"${saved_bal:,.0f}", style={"color": TEXT_MAIN, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "fontWeight": "bold"}),
+                        html.Span(f"{cur_sym(conf)}{saved_bal:,.0f}", style={"color": TEXT_MAIN, "fontSize": "0.85rem", "fontFamily": "Consolas, monospace", "fontWeight": "bold"}),
                         html.Span(" (config Analytics)", style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "fontFamily": "Consolas, monospace", "marginLeft": "5px"}),
                     ], style={"paddingTop": "25px"})
-                ], width=3),
-                
+                ], width=2),
+
                 dbc.Col([
                     html.Div(id="perf-status", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "paddingTop": "25px", "fontFamily": "Consolas, monospace"})
                 ], width=3),
@@ -1427,7 +1449,8 @@ def render_tab(tab, session):
                         style={"fontFamily": "Consolas, monospace", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}
                     ),
                     dcc.Download(id="download-daily"),
-                    dcc.Store(id="perf-daily-store")
+                    dcc.Store(id="perf-daily-store"),
+                    dcc.Store(id="perf-period-store")
                 ], width=2)
             ], style={"marginTop": "15px", "marginBottom": "20px"}),
 
@@ -1991,6 +2014,8 @@ def export_daily_series(n_clicks, store_data):
 # (es el mismo pero con prints de diagnóstico al inicio)
 # ══════════════════════════════════════════════════════════
 
+BENCHMARK_NAMES = {"SPY": "SPY", "SPY.BA": "SPY CEDEAR", "^MERV": "MERVAL"}
+
 @app.callback(
     [
         Output("fig-perf-cumulative", "figure"),
@@ -1998,21 +2023,24 @@ def export_daily_series(n_clicks, store_data):
         Output("fig-perf-value", "figure"),
         Output("perf-kpis-container", "children"),
         Output("perf-status", "children"),
-        Output("perf-daily-store", "data")
+        Output("perf-daily-store", "data"),
+        Output("perf-period-store", "data")
     ],
     [
     Input("btn-perf-ytd", "n_clicks"),
     Input("btn-perf-yoy", "n_clicks"),
     Input("btn-perf-all", "n_clicks"),
     Input("btn-perf-2025", "n_clicks"),
+    Input("benchmark-selector", "value"),
     ],
-    [State("session-store", "data")],
+    [State("perf-period-store", "data"),
+     State("session-store", "data")],
     prevent_initial_call=True
 )
-def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
+def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, stored_period, session):
     """Calcula y muestra el retorno acumulado del portfolio por periodo."""
 
-    # Determinar qué botón se apretó
+    # Determinar qué botón se apretó (si cambió el benchmark, mantener el período previo)
     triggered = ctx.triggered_id
     if triggered == "btn-perf-ytd":
         period = "YTD"
@@ -2020,11 +2048,13 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         period = "YOY"
     elif triggered == "btn-perf-2025":
         period = "2025"
+    elif triggered == "benchmark-selector":
+        period = stored_period or "ALL"
     else:
         period = "ALL"
 
     print("=" * 60)
-    print(f"[PERF] 🔥 CALLBACK DISPARADO! Periodo={period}")
+    print(f"[PERF] 🔥 CALLBACK DISPARADO! Periodo={period} | Benchmark={benchmark}")
     print(f"[PERF] session={session is not None}")
     print("=" * 60)
 
@@ -2036,13 +2066,16 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     )
 
     if not session:
-        return empty_fig, empty_fig, empty_fig, [], "⚠️ Sin sesión", None
+        return empty_fig, empty_fig, empty_fig, [], "⚠️ Sin sesión", None, period
 
     user = session['user']
 
     # Leer capital inicial de la config (mismo que Analytics)
     conf = session.get('config', {})
     initial_balance = conf.get('initial_balance', 10000)
+    sym = cur_sym(conf)
+    bench_ticker = benchmark if benchmark in BENCHMARK_NAMES else ("SPY.BA" if conf.get('currency') == 'ARS' else "SPY")
+    bench_name = BENCHMARK_NAMES[bench_ticker]
 
     try:
         initial_balance = float(initial_balance)
@@ -2050,10 +2083,10 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         initial_balance = 10000.0
 
     if initial_balance <= 0:
-        return empty_fig, empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics", None
-    
+        return empty_fig, empty_fig, empty_fig, [], "⚠️ Configurá un capital inicial en Analytics", None, period
+
     # ── CACHE CHECK ──
-    cache_key = f"{user}_{initial_balance}_{period}"
+    cache_key = f"{user}_{initial_balance}_{period}_{bench_ticker}_{sym}"
     now = dt_datetime.now()
     
     if cache_key in _perf_cache:
@@ -2071,7 +2104,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}, movimientos: {len(cash_movements_df)}")
 
     if df_closed.empty and df_open.empty:
-        return empty_fig, empty_fig, empty_fig, [], "⚠️ No hay trades para calcular", None
+        return empty_fig, empty_fig, empty_fig, [], "⚠️ No hay trades para calcular", None, period
     
     # ── FILTRAR POR PERIODO ──
     today = pd.Timestamp.now().normalize()
@@ -2137,7 +2170,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         df_open_filtered = pd.DataFrame()
 
     if df_filtered.empty and df_open_filtered.empty:
-        return empty_fig, empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}", None
+        return empty_fig, empty_fig, empty_fig, [], f"⚠️ No hay trades en el periodo: {period_label}", None, period
 
     print(f"[PERF] Trades filtrados ({period}): {len(df_filtered)} cerrados, {len(df_open_filtered)} abiertos")
     
@@ -2156,7 +2189,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
             daily_df = daily_df[daily_df['date'] >= pd.Timestamp(today.year, 1, 1)]
         elif period == "YOY":
             daily_df = daily_df[daily_df['date'] >= (today - pd.DateOffset(years=1))]
-        if daily_df.empty: return empty_fig, empty_fig, empty_fig, [], "⚠️ Portfolio vacío", None
+        if daily_df.empty: return empty_fig, empty_fig, empty_fig, [], "⚠️ Portfolio vacío", None, period
         daily_df = daily_df.reset_index(drop=True)
         # Recalcular retorno acumulado desde el inicio del periodo (arranca en 0%)
         # encadenando los retornos diarios TWR (los aportes/retiros no afectan el %)
@@ -2167,11 +2200,11 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
         # SPY se mide en el mismo periodo que el portfolio
         start_date_all = daily_df['date'].min()
         end_date_all = daily_df['date'].max()
-        spy_raw = yf.download("SPY", start=start_date_all, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
+        spy_raw = yf.download(bench_ticker, start=start_date_all, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
         
         if not spy_raw.empty:
             if isinstance(spy_raw.columns, pd.MultiIndex):
-                try: spy_series = spy_raw.xs('Close', level=0, axis=1)['SPY']
+                try: spy_series = spy_raw.xs('Close', level=0, axis=1)[bench_ticker]
                 except: spy_series = spy_raw.iloc[:, 0]
             else:
                 col = 'Close' if 'Close' in spy_raw.columns else spy_raw.columns[0]
@@ -2185,7 +2218,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
             
     except Exception as e:
         import traceback; traceback.print_exc()
-        return empty_fig, empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", None
+        return empty_fig, empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", None, period
     
     # KPIs Básicos
     total_end = daily_df['total_value'].iloc[-1]
@@ -2298,23 +2331,23 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     flow_cards = []
     if not cash_movements_df.empty:
         flow_cards = [
-            make_perf_card("APORTES (PERÍODO)", f"${total_deposits:,.0f}", "Depósitos externos", COLOR_POS),
-            make_perf_card("RETIROS (PERÍODO)", f"${total_withdrawals:,.0f}", "Extracciones", COLOR_NEG),
+            make_perf_card("APORTES (PERÍODO)", f"{sym}{total_deposits:,.0f}", "Depósitos externos", COLOR_POS),
+            make_perf_card("RETIROS (PERÍODO)", f"{sym}{total_withdrawals:,.0f}", "Extracciones", COLOR_NEG),
         ]
 
     kpis_layout = html.Div(dbc.Row([
-        make_perf_card("CAPITAL INICIAL", f"${initial_balance:,.0f}"),
-        make_perf_card("VALOR INICIAL", f"${period_start_value:,.0f}", "Inicio del período"),
+        make_perf_card("CAPITAL INICIAL", f"{sym}{initial_balance:,.0f}"),
+        make_perf_card("VALOR INICIAL", f"{sym}{period_start_value:,.0f}", "Inicio del período"),
         *flow_cards,
-        make_perf_card("GANANCIA NETA", f"${total_pnl:+,.0f}", "Excluye aportes/retiros", COLOR_POS if total_pnl >= 0 else COLOR_NEG),
-        make_perf_card("VALOR FINAL", f"${total_end:,.0f}", "Fin del período"),
-        make_perf_card("RETORNO TOTAL (TWR)", f"{total_return:+.2f}%", f"SPY: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
-        make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"SPY: {max_dd_spy:.2f}%", COLOR_NEG),
-        make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"SPY: {sharpe_spy:.2f}", TEXT_MAIN),
-        make_perf_card("SORTINO RATIO", f"{sortino_port:.2f}", f"SPY: {sortino_spy:.2f}", TEXT_MAIN),
-        make_perf_card("CALMAR RATIO", f"{calmar_port:.2f}", f"SPY: {calmar_spy:.2f}", TEXT_MAIN),
+        make_perf_card("GANANCIA NETA", f"{sym}{total_pnl:+,.0f}", "Excluye aportes/retiros", COLOR_POS if total_pnl >= 0 else COLOR_NEG),
+        make_perf_card("VALOR FINAL", f"{sym}{total_end:,.0f}", "Fin del período"),
+        make_perf_card("RETORNO TOTAL (TWR)", f"{total_return:+.2f}%", f"{bench_name}: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
+        make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"{bench_name}: {max_dd_spy:.2f}%", COLOR_NEG),
+        make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"{bench_name}: {sharpe_spy:.2f}", TEXT_MAIN),
+        make_perf_card("SORTINO RATIO", f"{sortino_port:.2f}", f"{bench_name}: {sortino_spy:.2f}", TEXT_MAIN),
+        make_perf_card("CALMAR RATIO", f"{calmar_port:.2f}", f"{bench_name}: {calmar_spy:.2f}", TEXT_MAIN),
         make_perf_card("ALPHA (JENSEN)", f"α {alpha:+.2f}%", "Exceso vs Riesgo", COLOR_SPY),
-        make_perf_card("BETA", f"β {beta:.2f}", "Sensibilidad vs SPY", TEXT_MAIN),
+        make_perf_card("BETA", f"β {beta:.2f}", f"Sensibilidad vs {bench_name}", TEXT_MAIN),
         make_perf_card("TIME UNDER WATER", f"{max_tuw:.0f} Max", f"{avg_tuw:.0f} Promedio (Días)", COLOR_NEG if max_tuw > 0 else TEXT_MAIN),
     ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
     
@@ -2322,7 +2355,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     fig_cumulative = go.Figure()
     # Agregamos la línea del SPY si existe
     if 'norm_spy' in daily_df.columns:
-        fig_cumulative.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['norm_spy'], mode='lines', line=dict(color='#555555', width=1, dash='dash'), name='SPY'))
+        fig_cumulative.add_trace(go.Scatter(x=daily_df['date'], y=daily_df['norm_spy'], mode='lines', line=dict(color='#555555', width=1, dash='dash'), name=bench_name))
         
     ret_pct = daily_df['cumulative_return'] * 100
     fig_cumulative.add_trace(go.Scatter(x=daily_df['date'], y=ret_pct, mode='lines', line=dict(color=COLOR_POS, width=2.5), fill='tozeroy', fillcolor='rgba(0, 176, 189, 0.15)', name='Retorno Acumulado', hovertemplate='%{x|%Y-%m-%d}<br>Retorno: %{y:.2f}%<extra></extra>'))
@@ -2343,18 +2376,18 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     fig_value.add_trace(go.Scatter(
         x=daily_df['date'], y=daily_df['net_contrib_line'], mode='lines', name='Contribuciones Netas',
         line=dict(color=COLOR_NEUTRAL, width=1, dash='dash'),
-        hovertemplate='%{x|%Y-%m-%d}<br>Contribuciones: %{y:$,.2f}<extra></extra>'
+        hovertemplate='%{x|%Y-%m-%d}<br>Contribuciones: ' + sym + '%{y:,.2f}<extra></extra>'
     ))
     fig_value.add_trace(go.Scatter(
         x=daily_df['date'], y=daily_df['total_value'], mode='lines', name='Valor de Cuenta',
         line=dict(color=COLOR_SPY, width=2), fill='tonexty', fillcolor='rgba(252, 213, 53, 0.08)',
-        hovertemplate='%{x|%Y-%m-%d}<br>Valor: %{y:$,.2f}<extra></extra>'
+        hovertemplate='%{x|%Y-%m-%d}<br>Valor: ' + sym + '%{y:,.2f}<extra></extra>'
     ))
     fig_value.update_layout(
-        title={'text': 'VALOR DE CUENTA VS CONTRIBUCIONES NETAS ($)', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 'x': 0.5, 'xanchor': 'center'},
+        title={'text': f'VALOR DE CUENTA VS CONTRIBUCIONES NETAS ({sym})', 'font': {'size': 14, 'color': TEXT_MAIN, 'family': 'Consolas, monospace'}, 'x': 0.5, 'xanchor': 'center'},
         paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=TEXT_MAIN, font_family="Consolas, monospace",
         hovermode='x unified', margin=dict(l=60, r=30, t=40, b=30),
-        yaxis=dict(title="Valor ($)", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, tickformat='$,.0f'),
+        yaxis=dict(title=f"Valor ({sym})", showgrid=True, gridcolor=BORDER_COLOR, zerolinecolor=BORDER_COLOR, tickprefix=sym, tickformat=",.0f"),
         xaxis=dict(title="Fecha", showgrid=False),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
@@ -2369,7 +2402,7 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, session):
     status = f"✓ {period_label} | {len(df_filtered)} cerrados + {open_count} abiertos | {len(daily_df)} días | Retorno: {total_return:+.2f}%"
     print(f"[PERF] ✅ {status}")
 
-    result = (fig_cumulative, fig_drawdown, fig_value, kpis_layout, status, store_data)
+    result = (fig_cumulative, fig_drawdown, fig_value, kpis_layout, status, store_data, period)
     _perf_cache[cache_key] = result; _perf_cache_time[cache_key] = now
     return result
 
