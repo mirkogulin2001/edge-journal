@@ -1,130 +1,168 @@
-/* --- FONDO GENERAL --- */
+/* ═══════════════════════════════════════════════════════════════
+   EDGE JOURNAL — Tema oscuro unificado
+   Paleta (única fuente de verdad, alineada con app.py):
+     Fondo general   #0B0E11
+     Tarjetas        #181A20
+     Filas impares   #1E222B
+     Bordes          #2B3139
+     Acento (teal)   #00B0BD
+     Negativo (rojo) #F6465D
+     Texto principal #EAECEF
+     Texto neutro    #848E9C
+   ═══════════════════════════════════════════════════════════════ */
+
+/* --- FONDO GENERAL Y TIPOGRAFÍA BASE --- */
 body {
-    background-color: #0b0c10 !important; /* Negro casi puro */
-    color: #c5c6c7 !important; /* Gris muy claro */
-    font-family: 'Roboto', 'Segoe UI', sans-serif;
+    background-color: #0B0E11 !important;
+    color: #EAECEF;
+    font-family: 'Inter', 'Segoe UI', sans-serif;
+}
+
+::selection {
+    background-color: rgba(0, 176, 189, 0.35);
+    color: #EAECEF;
+}
+
+/* --- SCROLLBARS OSCURAS (Chrome/Edge/Safari) --- */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: #0B0E11;
+}
+::-webkit-scrollbar-thumb {
+    background: #2B3139;
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: #00B0BD;
+}
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #2B3139 #0B0E11;
 }
 
 /* --- TARJETAS (CARDS) --- */
 .card {
-    background-color: #1f2833 !important; /* Gris azulado oscuro */
-    border: 1px solid #45a29e !important; /* Borde Cyan sutil */
-    box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    background-color: #181A20;
+    border: 1px solid #2B3139;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 }
 
 .card-header {
-    background-color: #1f2833 !important;
-    border-bottom: 1px solid #45a29e !important;
-    color: #66fcf1 !important; /* Texto Cyan Neon */
+    background-color: transparent;
+    border-bottom: 1px solid #2B3139;
+    color: #EAECEF;
     font-weight: bold;
 }
 
 /* --- INPUTS Y SELECTORES (BOOTSTRAP) --- */
-input.form-control, select.form-select {
-    background-color: #0b0c10 !important;
-    border: 1px solid #45a29e !important;
-    color: #ffffff !important;
+input.form-control, select.form-select, textarea.form-control {
+    background-color: #0B0E11;
+    border: 1px solid #2B3139;
+    color: #EAECEF;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-input.form-control::placeholder {
-    color: #6c757d !important;
+input.form-control::placeholder, textarea.form-control::placeholder {
+    color: #848E9C;
 }
 
-input.form-control:focus {
-    background-color: #1a1d24 !important;
-    box-shadow: 0 0 5px #66fcf1;
-    border-color: #66fcf1 !important;
-    color: white !important;
+input.form-control:focus, select.form-select:focus, textarea.form-control:focus {
+    background-color: #101318;
+    box-shadow: 0 0 0 3px rgba(0, 176, 189, 0.2);
+    border-color: #00B0BD;
+    color: #EAECEF;
 }
 
-/* --- PESTAÑAS (TABS) --- */
-.nav-tabs {
-    border-bottom: 1px solid #45a29e;
+/* --- BOTONES: micro-interacciones --- */
+.btn {
+    transition: background-color 0.15s ease, color 0.15s ease,
+                border-color 0.15s ease, transform 0.1s ease;
+}
+.btn:hover {
+    transform: translateY(-1px);
+}
+.btn:active {
+    transform: translateY(0);
 }
 
-.nav-link {
-    color: #c5c6c7 !important;
+/* --- KPI CARDS: hover sutil (los estilos base están inline en app.py) --- */
+.p-1 > div:hover, .mb-2 > div:hover {
+    border-color: #00B0BD !important;
+    transform: translateY(-2px);
 }
 
-.nav-link.active {
-    background-color: #1f2833 !important;
-    border-color: #45a29e #45a29e #1f2833 !important;
-    color: #66fcf1 !important;
-}
-
-/* --- BOTONES --- */
-.btn-primary {
-    background-color: #45a29e;
-    border: none;
-    color: #0b0c10;
-    font-weight: bold;
-}
-.btn-primary:hover {
-    background-color: #66fcf1;
-}
-
-/* --- TEXTOS ESPECÍFICOS --- */
+/* --- TEXTOS --- */
 h1, h2, h3, h4, h5 {
-    color: #ffffff !important;
+    color: #EAECEF !important;
 }
 
 .text-muted {
-    color: #8899a6 !important;
+    color: #848E9C !important;
 }
 
-/* --- AJUSTES DE LA TABLA (AG GRID) --- */
+/* --- AG GRID --- */
 .ag-theme-alpine-dark {
-    --ag-background-color: #1f2833;
-    --ag-header-background-color: #0b0c10;
-    --ag-odd-row-background-color: #171f26;
-    --ag-foreground-color: #ffffff;
-    --ag-border-color: #45a29e;
+    --ag-background-color: #181A20;
+    --ag-header-background-color: #0B0E11;
+    --ag-odd-row-background-color: #1E222B;
+    --ag-foreground-color: #EAECEF;
+    --ag-border-color: #2B3139;
+    --ag-row-hover-color: rgba(0, 176, 189, 0.08);
 }
 
 .ag-header-cell-label {
-    color: #66fcf1; /* Color de los títulos de columna */
+    color: #848E9C;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
 }
 
-/* --- NUEVO: DROPDOWNS DE DASH (React-Select) --- */
-/* Esto arregla el menú blanco de Analytics para que coincida con tu tema */
-
-/* La caja cerrada */
+/* --- DROPDOWNS DE DASH (React-Select) --- */
 .Select-control {
-    background-color: #0b0c10 !important; /* Fondo Negro (igual que tus inputs) */
-    border: 1px solid #45a29e !important; /* Borde Cyan */
-    color: #ffffff !important;
+    background-color: #0B0E11 !important;
+    border: 1px solid #2B3139 !important;
+    color: #EAECEF !important;
 }
 
-/* El texto de la opción elegida */
 .Select-value-label {
-    color: #ffffff !important;
+    color: #EAECEF !important;
 }
 
-/* El menú desplegable (la lista abierta) */
 .Select-menu-outer {
-    background-color: #1f2833 !important; /* Fondo Gris Azulado (igual que tus cards) */
-    border: 1px solid #45a29e !important;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+    background-color: #181A20 !important;
+    border: 1px solid #2B3139 !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Las opciones individuales */
 .Select-option {
-    background-color: #1f2833 !important;
-    color: #c5c6c7 !important;
+    background-color: #181A20 !important;
+    color: #EAECEF !important;
 }
 
-/* Opción cuando pasas el mouse por encima (Hover) */
 .Select-option.is-focused {
-    background-color: #45a29e !important; /* Tu color de acento */
-    color: #0b0c10 !important; /* Texto oscuro para contraste */
+    background-color: rgba(0, 176, 189, 0.15) !important;
+    color: #EAECEF !important;
 }
 
-/* El texto "Select..." cuando no hay nada */
 .Select-placeholder {
-    color: #6c757d !important;
+    color: #848E9C !important;
 }
 
-/* La flechita del dropdown */
 .Select-arrow {
-    border-color: #45a29e transparent transparent !important;
+    border-color: #848E9C transparent transparent !important;
+}
+
+/* --- MODALES --- */
+.modal-content {
+    background-color: #181A20;
+    border: 1px solid #2B3139;
+}
+
+/* --- TOOLTIPS DE PLOTLY: tipografía consistente --- */
+.hoverlayer .hovertext text {
+    font-family: 'JetBrains Mono', Consolas, monospace !important;
 }
