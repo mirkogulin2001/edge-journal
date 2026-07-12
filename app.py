@@ -1021,7 +1021,15 @@ def layout_dashboard(username):
             dcc.Tab(label='PERFORMANCE', value='tab-performance', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='INFORMACIÓN Y USO', value='tab-info', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE)
         ]), 
-        html.Div(id='tab-content', className="pt-4"), html.Div(id="hidden-wrapper")
+        dcc.Loading(
+            id="loading-tab",
+            type="default",
+            color=COLOR_NEUTRAL,
+            # Solo el render de la pestaña dispara este spinner; los callbacks
+            # internos (grids, períodos de Performance) usan sus propios Loading.
+            target_components={"tab-content": "children"},
+            children=html.Div(id='tab-content', className="pt-4")
+        ), html.Div(id="hidden-wrapper")
     ])
 
 # --- WRAPPER GENERAL PREMIUM ---
@@ -1487,50 +1495,53 @@ def render_tab(tab, session):
                 ], style={"backgroundColor": CARD_BG})
             ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "4px", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)", "marginBottom": "25px"}),
 
-            # KPIs resumen
-            html.Div(id="perf-kpis-container", style={"marginBottom": "25px"}),
-            
-            # Gráfico principal: Retorno Acumulado
-            dbc.Row([
-                dbc.Col([
-                    dcc.Graph(
-                        id="fig-perf-cumulative",
-                        config={'displayModeBar': False},
-                        style={"height": "450px"},
-                        figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
-                                           "xaxis": {"visible": False}, "yaxis": {"visible": False},
-                                           "font": {"color": COLOR_NEUTRAL}}}
-                    )
-                ], width=12)
-            ]),
-            
-            # Gráfico secundario: Drawdown %
-            dbc.Row([
-                dbc.Col([
-                    dcc.Graph(
-                        id="fig-perf-drawdown",
-                        config={'displayModeBar': False},
-                        style={"height": "250px"},
-                        figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
-                                           "xaxis": {"visible": False}, "yaxis": {"visible": False},
-                                           "font": {"color": COLOR_NEUTRAL}}}
-                    )
-                ], width=12)
-            ], style={"marginTop": "10px"}),
+            # Resultados con spinner mientras corre el cálculo de Performance
+            dcc.Loading(id="loading-performance", type="default", color=COLOR_NEUTRAL, children=html.Div([
+                # KPIs resumen
+                html.Div(id="perf-kpis-container", style={"marginBottom": "25px"}),
 
-            # Gráfico terciario: Valor de cuenta vs contribuciones netas (estilo Schwab)
-            dbc.Row([
-                dbc.Col([
-                    dcc.Graph(
-                        id="fig-perf-value",
-                        config={'displayModeBar': False},
-                        style={"height": "350px"},
-                        figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
-                                           "xaxis": {"visible": False}, "yaxis": {"visible": False},
-                                           "font": {"color": COLOR_NEUTRAL}}}
-                    )
-                ], width=12)
-            ], style={"marginTop": "10px"})
+                # Gráfico principal: Retorno Acumulado
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(
+                            id="fig-perf-cumulative",
+                            config={'displayModeBar': False},
+                            style={"height": "450px"},
+                            figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
+                                               "xaxis": {"visible": False}, "yaxis": {"visible": False},
+                                               "font": {"color": COLOR_NEUTRAL}}}
+                        )
+                    ], width=12)
+                ]),
+
+                # Gráfico secundario: Drawdown %
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(
+                            id="fig-perf-drawdown",
+                            config={'displayModeBar': False},
+                            style={"height": "250px"},
+                            figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
+                                               "xaxis": {"visible": False}, "yaxis": {"visible": False},
+                                               "font": {"color": COLOR_NEUTRAL}}}
+                        )
+                    ], width=12)
+                ], style={"marginTop": "10px"}),
+
+                # Gráfico terciario: Valor de cuenta vs contribuciones netas (estilo Schwab)
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(
+                            id="fig-perf-value",
+                            config={'displayModeBar': False},
+                            style={"height": "350px"},
+                            figure={"layout": {"paper_bgcolor": CARD_BG, "plot_bgcolor": CARD_BG,
+                                               "xaxis": {"visible": False}, "yaxis": {"visible": False},
+                                               "font": {"color": COLOR_NEUTRAL}}}
+                        )
+                    ], width=12)
+                ], style={"marginTop": "10px"})
+            ]))
 
         ], fluid=True, style={"backgroundColor": BG_COLOR, "minHeight": "100vh", "padding": "20px"})
     
