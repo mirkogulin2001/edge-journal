@@ -21,6 +21,24 @@ _cache_timestamp = {}
 _perf_cache = {}
 _perf_cache_time = {}
 PERF_CACHE_TTL = 300
+# Cache de precios históricos (los cierres pasados no cambian intradía)
+_hist_price_cache = {}
+_hist_price_cache_time = {}
+HIST_CACHE_TTL = 600
+# Cache de la serie diaria construida del portfolio (por usuario):
+# los cambios de período solo recortan esta serie, no la reconstruyen
+_daily_cache = {}
+_daily_cache_time = {}
+# Cache de series de benchmark (rango completo, se recorta por período)
+_bench_cache = {}
+_bench_cache_time = {}
+
+def invalidate_perf_caches():
+    """Limpia los caches de Performance. Llamar cuando cambian trades o movimientos."""
+    _perf_cache.clear()
+    _perf_cache_time.clear()
+    _daily_cache.clear()
+    _daily_cache_time.clear()
 
 def get_cached_live_prices(tickers):
     """Obtiene precios con cache de 30 segundos para evitar descargas repetitivas"""
@@ -283,21 +301,28 @@ def build_daily_portfolio(df_closed, initial_balance, df_open=None, cash_movemen
         start_date = min(start_date, movements['movement_date'].min().date())
         end_date = max(end_date, movements['movement_date'].max().date())
 
-    # Descargar precios históricos de todos los tickers
+    # Descargar precios históricos de todos los tickers (con cache de 10 min)
     tickers = list(df['symbol'].unique())
     try:
-        print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers: {tickers}")
-        print(f"[PERFORMANCE] Rango de fechas: {start_date} → {end_date}")
-        
-        prices_raw = yf.download(
-            tickers=tickers,
-            start=start_date,
-            end=end_date + timedelta(days=1),
-            auto_adjust=False,
-            progress=False
-        )
-        
-        print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
+        hist_key = (tuple(sorted(tickers)), str(start_date), str(end_date))
+        now_hist = dt_datetime.now()
+        if hist_key in _hist_price_cache and (now_hist - _hist_price_cache_time[hist_key]).total_seconds() < HIST_CACHE_TTL:
+            prices_raw = _hist_price_cache[hist_key]
+            print(f"[PERFORMANCE] ⚡ Precios históricos desde cache ({len(tickers)} tickers)")
+        else:
+            print(f"[PERFORMANCE] Descargando precios para {len(tickers)} tickers: {tickers}")
+            print(f"[PERFORMANCE] Rango de fechas: {start_date} → {end_date}")
+
+            prices_raw = yf.download(
+                tickers=tickers,
+                start=start_date,
+                end=end_date + timedelta(days=1),
+                auto_adjust=False,
+                progress=False
+            )
+            _hist_price_cache[hist_key] = prices_raw
+            _hist_price_cache_time[hist_key] = now_hist
+            print(f"[PERFORMANCE] Descarga completada. Shape: {prices_raw.shape}")
         
         # Formatear precios: siempre producir columnas simples {ticker: precio_cierre}
         # yfinance puede retornar MultiIndex (Price, Ticker) o columnas simples según versión
@@ -367,41 +392,44 @@ def build_daily_portfolio(df_closed, initial_balance, df_open=None, cash_movemen
             external_flows[day_key] = external_flows.get(day_key, 0) + mov['signed_amount']
 
     all_dates = prices.index
-    daily_values = []
-    cash = initial_balance
 
-    for day in all_dates:
-        # Sumamos/Restamos el flujo de caja del día (trades + aportes/retiros)
-        ext_flow = external_flows.get(day, 0)
-        cash += cash_flows.get(day, 0) + ext_flow
+    # ── Valuación VECTORIZADA (una operación por trade, no por día) ──
+    # Flujos de caja diarios (trades + externos)
+    flow_series = pd.Series(0.0, index=all_dates)
+    for d, amt in cash_flows.items():
+        flow_series.loc[d] += amt
+    ext_series = pd.Series(0.0, index=all_dates)
+    for d, amt in external_flows.items():
+        ext_series.loc[d] += amt
 
-        # Posiciones abiertas (Liability en caso de Shorts)
-        open_trades = df[(df['entry_date'] <= day) & ((df['exit_date'].isna()) | (df['exit_date'] > day))]
-        equity = 0.0
-        
-        for _, trade in open_trades.iterrows():
-            ticker = trade['symbol']
-            
-            # Obtener precio actual o usar el de entrada como fallback
-            # Usamos .at para garantizar acceso escalar (evita Series con MultiIndex)
-            if ticker in prices.columns:
-                price = prices.at[day, ticker]
-                if pd.isna(price):
-                    price = trade['entry_price']
-            else:
-                price = trade['entry_price']
-                
-            if trade['side'] == 'LONG': 
-                equity += trade['quantity'] * price
-            else: 
-                # SHORT: El valor de la posición es un pasivo (lo que cuesta recomprar)
-                equity -= trade['quantity'] * price
-                
-        # Total = Efectivo en cuenta + Valor de las inversiones (o - deudas short)
-        total = cash + equity
-        daily_values.append({'date': day, 'total_value': total, 'cash': cash, 'equity_value': equity, 'external_flow': ext_flow})
+    cash_series = float(initial_balance) + (flow_series + ext_series).cumsum()
 
-    result = pd.DataFrame(daily_values)
+    # Equity: cada trade aporta qty × precio en su ventana [entry, exit)
+    # (mismo criterio que antes: abierto si entry <= día y (sin exit o exit > día);
+    #  fallback al precio de entrada si el ticker no tiene datos; SHORT resta como pasivo)
+    equity_values = np.zeros(len(all_dates))
+    for _, trade in df.iterrows():
+        window = (all_dates >= trade['entry_date'])
+        if pd.notna(trade['exit_date']):
+            window &= (all_dates < trade['exit_date'])
+        if not window.any():
+            continue
+        ticker = trade['symbol']
+        if ticker in prices.columns:
+            col = prices[ticker].fillna(trade['entry_price']).values
+        else:
+            col = np.full(len(all_dates), float(trade['entry_price']))
+        sign = 1.0 if trade['side'] == 'LONG' else -1.0
+        equity_values += np.where(window, sign * trade['quantity'] * col, 0.0)
+
+    total_values = cash_series.values + equity_values
+    result = pd.DataFrame({
+        'date': all_dates,
+        'total_value': total_values,
+        'cash': cash_series.values,
+        'equity_value': equity_values,
+        'external_flow': ext_series.values
+    })
 
     # Daily Time-Weighted Return (método Schwab): cada retorno diario descuenta
     # los aportes/retiros del día, así los flujos externos no afectan el % de retorno.
@@ -1876,6 +1904,7 @@ def manage_history(n_sel, n_all, selected, session):
     if ctx_id == 'btn-del-sel-hist':
         if not selected: return no_update, "Seleccion requerida."
         if db.delete_trade(selected[0]['id']):
+            invalidate_perf_caches()
             df = db.get_closed_trades(user)
             df = add_pnl_pct(df)
             # Proteccion tabla vacia dentro del callback
@@ -1888,7 +1917,9 @@ def manage_history(n_sel, n_all, selected, session):
             return format_df(df, session.get('config', {})), "Registro eliminado."
         return no_update, "Error BD."
     if ctx_id == 'confirm-del-all':
-        if db.delete_all_closed_trades(user): return [], "BD limpiada."
+        if db.delete_all_closed_trades(user):
+            invalidate_perf_caches()
+            return [], "BD limpiada."
         return no_update, "Error BD."
     return no_update, ""
 
@@ -2046,6 +2077,7 @@ def ops_callback(n_new, list_of_contents, list_of_names, nt, ns, np, nq, nsl, nd
     
     if ctx_id == 'upload-data' and list_of_contents:
         msg, new_keys = parse_contents(list_of_contents, list_of_names, s['user'])
+        invalidate_perf_caches()
         
         # --- AUTO ACTUALIZACION DE CONFIGURACION ---
         if new_keys:
@@ -2068,6 +2100,7 @@ def ops_callback(n_new, list_of_contents, list_of_names, nt, ns, np, nq, nsl, nd
         tags = {id_dict['index']: val for val, id_dict in zip(vals, ids) if val}
         # AQUI USAMOS LA NUEVA FUNCION DE DB QUE ACEPTA NOTAS
         db.open_new_trade(s['user'], nt.upper(), ns, float(np), int(nq), nd, float(nsl) or 0, float(nsl) or 0, tags, str(n_notes) if n_notes else "")
+        invalidate_perf_caches()
         df_open = db.get_open_trades(s['user'])
         if not df_open.empty: df_open = calculate_live_metrics(df_open)
         return "Orden ingresada.", format_df(df_open, s.get('config', {})), no_update
@@ -2102,13 +2135,14 @@ def manage(b1, b2, b3, b4, b_all, trade, cp, cd, cr, pq, pp, p_date, usl, c_note
 
     if not trade: return no_update, no_update, no_update, no_update
     tid = trade['id']
-    if cid == 'btn-close': 
+    if cid == 'btn-close':
         # AQUI USAMOS LA NUEVA FUNCION DE DB QUE ACEPTA NOTAS DE SALIDA
         db.close_trade_total(tid, cp, cd, cr, str(c_notes) if c_notes else "")
     elif cid == 'btn-part': db.close_partial(tid, pq, pp, p_date or date.today())
     elif cid == 'btn-sl': db.update_stop_loss(tid, usl)
     elif cid == 'btn-del': db.delete_trade(tid)
-    
+    invalidate_perf_caches()  # los trades cambiaron: Performance debe recalcular
+
     df_open = db.get_open_trades(s['user'])
     if not df_open.empty: df_open = calculate_live_metrics(df_open)
     return "Actualizado.", format_df(df_open, s.get('config', {})), {'display': 'none'}, []
@@ -2127,9 +2161,8 @@ def manage_cash_movements(n_add, n_del, cm_date, cm_amount, cm_type, selected, s
     user = session['user']
 
     def _refresh():
-        # Invalidar cache de Performance para que el próximo cálculo use los nuevos flujos
-        _perf_cache.clear()
-        _perf_cache_time.clear()
+        # Invalidar caches de Performance para que el próximo cálculo use los nuevos flujos
+        invalidate_perf_caches()
         df = db.get_cash_movements(user)
         return df.to_dict("records") if not df.empty else []
 
@@ -2286,11 +2319,18 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, active_ta
         else:
             print(f"[PERF] 🔄 Cache expirado ({elapsed:.0f}s)")
     
-    # ── OBTENER TRADES Y MOVIMIENTOS DE CAPITAL ──
-    df_closed = db.get_closed_trades(user)
-    df_open = db.get_open_trades(user)
-    cash_movements_df = db.get_cash_movements(user)
-    print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}, movimientos: {len(cash_movements_df)}")
+    # ── OBTENER TRADES, MOVIMIENTOS Y SERIE DIARIA (con cache por usuario) ──
+    # Los cambios de período no reconstruyen la serie: solo la recortan.
+    daily_key = (user, initial_balance)
+    if daily_key in _daily_cache and (now - _daily_cache_time[daily_key]).total_seconds() < PERF_CACHE_TTL:
+        df_closed, df_open, cash_movements_df, daily_full = _daily_cache[daily_key]
+        print(f"[PERF] ⚡ Serie diaria desde cache ({len(daily_full)} días)")
+    else:
+        df_closed = db.get_closed_trades(user)
+        df_open = db.get_open_trades(user)
+        cash_movements_df = db.get_cash_movements(user)
+        print(f"[PERF] Trades cerrados: {len(df_closed)}, abiertos: {len(df_open)}, movimientos: {len(cash_movements_df)}")
+        daily_full = None  # se construye más abajo si hay trades
 
     if df_closed.empty and df_open.empty:
         return empty_fig, empty_fig, [], "⚠️ No hay trades para calcular", None, period
@@ -2370,7 +2410,11 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, active_ta
         # el PnL realizado previo al período no se acumula al cash y el valor inicial del
         # período queda subestimado (infla el TWR). El valor de arranque del período debe
         # ser el valor real arrastrado de la cuenta (= "Beginning Account Value" del broker).
-        daily_df = build_daily_portfolio(df_closed, initial_balance, df_open, cash_movements_df)
+        if daily_full is None:
+            daily_full = build_daily_portfolio(df_closed, initial_balance, df_open, cash_movements_df)
+            _daily_cache[daily_key] = (df_closed, df_open, cash_movements_df, daily_full)
+            _daily_cache_time[daily_key] = now
+        daily_df = daily_full.copy()
         # Recortar al periodo
         if period == "2025":
             daily_df = daily_df[(daily_df['date'] >= '2025-01-01') & (daily_df['date'] <= '2025-12-31')]
@@ -2385,26 +2429,35 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, active_ta
         period_rets = daily_df['daily_return'].copy()
         period_rets.iloc[0] = 0.0
         daily_df['cumulative_return'] = (1 + period_rets).cumprod() - 1
-       # --- DESCARGA DE SPY PARA BENCHMARK ---
-        # SPY se mide en el mismo periodo que el portfolio
-        start_date_all = daily_df['date'].min()
-        end_date_all = daily_df['date'].max()
-        spy_raw = yf.download(bench_ticker, start=start_date_all, end=end_date_all + pd.Timedelta(days=3), progress=False, auto_adjust=True)
-        
-        if not spy_raw.empty:
-            if isinstance(spy_raw.columns, pd.MultiIndex):
-                try: spy_series = spy_raw.xs('Close', level=0, axis=1)[bench_ticker]
-                except: spy_series = spy_raw.iloc[:, 0]
-            else:
-                col = 'Close' if 'Close' in spy_raw.columns else spy_raw.columns[0]
-                spy_series = spy_raw[col]
-            spy_series.index = pd.to_datetime(spy_series.index).normalize()
+
+        # --- BENCHMARK (serie de rango completo cacheada; se recorta por período) ---
+        full_start = daily_full['date'].min()
+        full_end = daily_full['date'].max()
+        bench_key = (bench_ticker, str(full_start.date()), str(full_end.date()))
+        if bench_key in _bench_cache and (now - _bench_cache_time[bench_key]).total_seconds() < HIST_CACHE_TTL:
+            spy_series = _bench_cache[bench_key]
+            print(f"[PERF] ⚡ Benchmark {bench_ticker} desde cache")
+        else:
+            spy_raw = yf.download(bench_ticker, start=full_start, end=full_end + pd.Timedelta(days=3), progress=False, auto_adjust=True)
+            spy_series = None
+            if not spy_raw.empty:
+                if isinstance(spy_raw.columns, pd.MultiIndex):
+                    try: spy_series = spy_raw.xs('Close', level=0, axis=1)[bench_ticker]
+                    except: spy_series = spy_raw.iloc[:, 0]
+                else:
+                    col = 'Close' if 'Close' in spy_raw.columns else spy_raw.columns[0]
+                    spy_series = spy_raw[col]
+                spy_series.index = pd.to_datetime(spy_series.index).normalize()
+            _bench_cache[bench_key] = spy_series
+            _bench_cache_time[bench_key] = now
+
+        if spy_series is not None:
             spy_aligned = spy_series.reindex(daily_df['date']).ffill().bfill()
             daily_df['spy_price'] = spy_aligned.values
-            print(f"[PERF] SPY alineado: {len(spy_aligned)} días, precio inicio={float(spy_aligned.iloc[0]):.2f}, precio fin={float(spy_aligned.iloc[-1]):.2f}")
-        else: 
+            print(f"[PERF] Benchmark alineado: {len(spy_aligned)} días, inicio={float(spy_aligned.iloc[0]):.2f}, fin={float(spy_aligned.iloc[-1]):.2f}")
+        else:
             daily_df['spy_price'] = np.nan
-            
+
     except Exception as e:
         import traceback; traceback.print_exc()
         return empty_fig, empty_fig, [], f"⚠️ Error: {str(e)}", None, period
