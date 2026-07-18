@@ -100,6 +100,9 @@ TAB_SELECTED_STYLE = {
 PERF_BTN_STYLE = {"fontFamily": "'Inter', 'Segoe UI', sans-serif", "fontWeight": "bold", "borderColor": BORDER_COLOR, "color": COLOR_NEUTRAL}
 PERF_BTN_ACTIVE_STYLE = {**PERF_BTN_STYLE, "color": "#000", "backgroundColor": COLOR_POS, "borderColor": COLOR_POS}
 
+# Pestañas del dashboard (los paneles persistentes usan estos ids)
+TAB_IDS = ['tab-active', 'tab-history', 'tab-analytics', 'tab-montecarlo', 'tab-performance', 'tab-info']
+
 # --- ESTILO DE GRILLA QUANT ---
 CUSTOM_GRID_STYLE = {
     "--ag-background-color": CARD_BG,
@@ -1062,21 +1065,27 @@ def layout_dashboard(username):
         ], className="mb-4 mt-1", align="center"),
         
         dcc.Tabs(id="tabs", value='tab-active', children=[
-            dcc.Tab(label='OPERATIVA', value='tab-active', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE), 
-            dcc.Tab(label='HISTORIAL', value='tab-history', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE), 
+            dcc.Tab(label='OPERATIVA', value='tab-active', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
+            dcc.Tab(label='HISTORIAL', value='tab-history', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='ANALYTICS', value='tab-analytics', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='SIMULADOR DE RIESGO', value='tab-montecarlo', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='PERFORMANCE', value='tab-performance', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE),
             dcc.Tab(label='INFORMACIÓN Y USO', value='tab-info', style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE)
         ]), 
+        # Paneles persistentes por pestaña (patrón SPA): cada pestaña se renderiza
+        # una sola vez en su primera visita y después el cambio es un toggle de
+        # visibilidad ejecutado en el navegador — instantáneo, sin ir al servidor.
+        dcc.Store(id='rendered-tabs-store', data=[]),
         dcc.Loading(
             id="loading-tab",
             type="default",
             color=COLOR_NEUTRAL,
-            # Solo el render de la pestaña dispara este spinner; los callbacks
-            # internos (grids, períodos de Performance) usan sus propios Loading.
-            target_components={"tab-content": "children"},
-            children=html.Div(id='tab-content', className="pt-4")
+            # Solo el render inicial de cada panel dispara este spinner
+            target_components={f"pane-{t}": "children" for t in TAB_IDS},
+            children=html.Div([
+                html.Div(id=f"pane-{t}", className="pt-4", style={'display': 'none'})
+                for t in TAB_IDS
+            ])
         ), html.Div(id="hidden-wrapper")
     ])
 
@@ -1284,8 +1293,8 @@ def build_open_grid_cols(conf, mode="$"):
         risk_col = {"field": "open_risk", "headerName": "Riesgo", "width": 90, "cellStyle": {'color': COLOR_NEG}}
     return [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 70}] + dyn_cols + [{"field": "entry_price", "headerName": "In", "width": 90}, {"field": "current_price", "headerName": "Live", "width": 90, "cellStyle": {'fontWeight': 'bold'}}, pnl_col, risk_col, {"field": "current_stop_loss", "headerName": "SL Act", "width": 90, "editable": True, "cellStyle": {'color': TEXT_MAIN, 'fontWeight': 'bold', 'backgroundColor': '#2B3139'}}]
 
-@app.callback(Output('tab-content', 'children'), [Input('tabs', 'value'), Input('session-store', 'data')])
 def render_tab(tab, session):
+    """Construye el contenido de una pestaña (función pura, sin callback)."""
     if not session: return html.Div()
     user, conf = session['user'], session.get('config', {})
 
@@ -1802,6 +1811,62 @@ def render_tab(tab, session):
         ])
     return html.Div()
 
+# --- NAVEGACIÓN SPA: paneles persistentes por pestaña ---
+
+# 1) Cambio de visibilidad instantáneo en el navegador (cero servidor)
+app.clientside_callback(
+    """
+    function(tab) {
+        const tabs = ['tab-active','tab-history','tab-analytics','tab-montecarlo','tab-performance','tab-info'];
+        return tabs.map(t => t === tab ? {'display': 'block'} : {'display': 'none'});
+    }
+    """,
+    [Output(f"pane-{t}", "style") for t in TAB_IDS],
+    Input("tabs", "value")
+)
+
+# 2) Render perezoso: cada pestaña se construye en el servidor SOLO la primera
+#    vez que se visita (o tras un cambio de sesión/config, que resetea todo).
+@app.callback(
+    [Output(f"pane-{t}", "children") for t in TAB_IDS] + [Output('rendered-tabs-store', 'data')],
+    [Input('tabs', 'value'), Input('session-store', 'data')],
+    State('rendered-tabs-store', 'data')
+)
+def populate_tab(tab, session, rendered):
+    if not session:
+        return [html.Div() for _ in TAB_IDS] + [[]]
+    rendered = rendered or []
+    if ctx.triggered_id == 'session-store' or not rendered:
+        # Login o cambio de config: renderizar la pestaña activa y limpiar el resto
+        outs = [render_tab(t, session) if t == tab else html.Div() for t in TAB_IDS]
+        return outs + [[tab]]
+    if tab in rendered:
+        return [no_update for _ in TAB_IDS] + [no_update]
+    outs = [render_tab(t, session) if t == tab else no_update for t in TAB_IDS]
+    return outs + [rendered + [tab]]
+
+# 3) Refresco de datos en segundo plano al volver a una pestaña ya montada
+#    (el panel aparece instantáneo con los datos previos y el grid se actualiza detrás)
+@app.callback(Output('open-grid', 'rowData', allow_duplicate=True), Input('tabs', 'value'), State('session-store', 'data'), prevent_initial_call=True)
+def refresh_open_grid_on_tab(tab, session):
+    if tab != 'tab-active' or not session: return no_update
+    df = db.get_open_trades(session['user'])
+    if not df.empty: df = calculate_live_metrics(df)
+    return format_df(df, session.get('config', {}))
+
+@app.callback(Output('history-grid', 'rowData', allow_duplicate=True), Input('tabs', 'value'), State('session-store', 'data'), prevent_initial_call=True)
+def refresh_history_grid_on_tab(tab, session):
+    if tab != 'tab-history' or not session: return no_update
+    df = db.get_closed_trades(session['user'])
+    df = add_pnl_pct(df)
+    if not df.empty and 'exit_date' in df.columns:
+        df = df.sort_values('exit_date', ascending=True)
+        df['visual_id'] = range(1, len(df) + 1)
+        df = df.sort_values('exit_date', ascending=False)
+    else:
+        df = pd.DataFrame()
+    return format_df(df, session.get('config', {}))
+
 # --- CALLBACKS GESTIÓN HISTORIAL ---
 @app.callback([Output('history-grid', 'rowData'), Output('hist-msg', 'children')], [Input('btn-del-sel-hist', 'n_clicks'), Input('confirm-del-all', 'submit_n_clicks')], [State('history-grid', 'selectedRows'), State('session-store', 'data')])
 def manage_history(n_sel, n_all, selected, session):
@@ -1828,9 +1893,12 @@ def manage_history(n_sel, n_all, selected, session):
     return no_update, ""
 
 # --- CALLBACKS ANALYTICS ---
-@app.callback([Output("fig-equity", "figure"), Output("fig-dd", "figure"), Output("fig-portfolio", "figure"), Output("fig-edge", "figure"), Output("fig-hist", "figure"), Output("kpi-container", "children"), Output("fig-strategy", "figure"), Output("fig-count", "figure"), Output("fig-evo-winrate", "figure"), Output("fig-evo-ratio", "figure")], [Input("initial-balance-input", "value"), Input("strategy-selector", "value"), Input("session-store", "data")])
-def update_analytics(start_bal, selected_metric, session):
-    if not session: 
+@app.callback([Output("fig-equity", "figure"), Output("fig-dd", "figure"), Output("fig-portfolio", "figure"), Output("fig-edge", "figure"), Output("fig-hist", "figure"), Output("kpi-container", "children"), Output("fig-strategy", "figure"), Output("fig-count", "figure"), Output("fig-evo-winrate", "figure"), Output("fig-evo-ratio", "figure")], [Input("initial-balance-input", "value"), Input("strategy-selector", "value"), Input("session-store", "data"), Input("tabs", "value")], prevent_initial_call=False)
+def update_analytics(start_bal, selected_metric, session, active_tab=None):
+    # Al volver a la pestaña, recalcular en segundo plano; ignorar cambios a otras pestañas
+    if ctx.triggered_id == 'tabs' and active_tab != 'tab-analytics':
+        return tuple(no_update for _ in range(10))
+    if not session:
         return {}, {}, {}, {}, {}, [], {}, {}, {}, {}
     try:
         capital_final = float(start_bal[0] if isinstance(start_bal, list) else start_bal)
@@ -2139,18 +2207,24 @@ def highlight_period_button(period):
     Input("btn-perf-2025", "n_clicks"),
     Input("benchmark-selector", "value"),
     Input("perf-autoload", "n_intervals"),
+    Input("tabs", "value"),
     ],
     [State("perf-period-store", "data"),
      State("session-store", "data")],
     prevent_initial_call=True
 )
-def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, stored_period, session):
+def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, active_tab, stored_period, session):
     """Calcula y muestra el retorno acumulado del portfolio por periodo."""
 
-    # Determinar qué botón se apretó. Si cambió el benchmark o es el disparo
-    # automático al entrar a la pestaña, usar el último período (default YTD).
+    # Determinar qué botón se apretó. Si cambió el benchmark, es el disparo
+    # automático al montar la pestaña, o el usuario volvió a entrar (tabs),
+    # usar el último período (default YTD).
     triggered = ctx.triggered_id
-    if triggered == "btn-perf-ytd":
+    if triggered == "tabs":
+        if active_tab != 'tab-performance':
+            return tuple(no_update for _ in range(6))
+        period = stored_period or "YTD"
+    elif triggered == "btn-perf-ytd":
         period = "YTD"
     elif triggered == "btn-perf-yoy":
         period = "YOY"
