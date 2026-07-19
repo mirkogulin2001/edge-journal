@@ -12,12 +12,12 @@
    ═══════════════════════════════════════════════════════════════ */
 
 /* --- FONDO GENERAL Y TIPOGRAFÍA BASE --- */
-/* Inter en toda la app, con números tabulares para alinear cifras */
+/* Michroma en toda la app (fallback Inter), números tabulares para cifras */
 body {
     background-color: #0B0E11 !important;
     color: #EAECEF;
-    font-family: 'Inter', 'Segoe UI', sans-serif;
-    /* Cifras alineadas en columnas aunque estén en Inter */
+    font-family: 'Michroma', 'Inter', sans-serif;
+    /* Cifras alineadas en columnas */
     font-variant-numeric: tabular-nums;
 }
 
@@ -120,16 +120,16 @@ h1, h2, h3, h4, h5 {
 .ag-header-cell-label {
     color: #848E9C;
     text-transform: uppercase;
-    font-size: 0.75rem;
+    font-size: 0.62rem;
     letter-spacing: 0.5px;
-    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-family: 'Michroma', 'Inter', sans-serif;
 }
 
-/* Celdas de datos: Inter con números tabulares (alineación de columnas) */
+/* Celdas de datos con números tabulares (alineación de columnas) */
 .ag-cell {
-    font-family: 'Inter', 'Segoe UI', sans-serif;
+    font-family: 'Michroma', 'Inter', sans-serif;
     font-variant-numeric: tabular-nums;
-    font-size: 0.82rem;
+    font-size: 0.68rem;
 }
 
 /* --- DROPDOWNS DE DASH (React-Select) --- */
@@ -175,5 +175,5 @@ h1, h2, h3, h4, h5 {
 
 /* --- TOOLTIPS DE PLOTLY: tipografía consistente --- */
 .hoverlayer .hovertext text {
-    font-family: 'Inter', 'Segoe UI', sans-serif !important;
+    font-family: 'Michroma', 'Inter', sans-serif !important;
 }
