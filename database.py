@@ -27,7 +27,7 @@ def get_user(username):
         print(f"Error get_user: {e}")
         return None
 
-def register_user(username, password, full_name):
+def register_user(username, password, full_name, email=""):
     try:
         if get_user(username):
             return False, "Usuario ya existe"
@@ -35,12 +35,22 @@ def register_user(username, password, full_name):
             "username": username,
             "password_hash": password,
             "full_name": full_name,
+            "email": str(email).strip().lower(),
             "config": {}
         }
         supabase.table("users").insert(data).execute()
         return True, "Usuario creado"
     except Exception as e:
         return False, str(e)
+
+def update_user_password(username, new_password):
+    """Actualiza la contraseña de un usuario (usado por la recuperación)."""
+    try:
+        supabase.table("users").update({"password_hash": new_password}).eq("username", username).execute()
+        return True
+    except Exception as e:
+        print(f"Error update_password: {e}")
+        return False
 
 def update_user_config(username, new_config):
     try:

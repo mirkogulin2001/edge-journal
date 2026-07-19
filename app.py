@@ -1068,6 +1068,7 @@ global_modals = html.Div([
         dbc.Input(id="reg-u", placeholder="Usuario", className="mb-3", style=INPUT_STYLE),
         dbc.Input(id="reg-p", placeholder="Contraseña", type="password", className="mb-3", style=INPUT_STYLE),
         dbc.Input(id="reg-n", placeholder="Nombre Completo", className="mb-3", style=INPUT_STYLE),
+        dbc.Input(id="reg-e", placeholder="Email (para recuperar tu contraseña)", type="email", className="mb-3", style=INPUT_STYLE),
         html.Div([
             dbc.Checkbox(id="tc-accept", value=False, style={"display": "inline-block", "marginRight": "8px"}),
             html.Span("Leí y acepto los ", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem"}),
@@ -1098,6 +1099,21 @@ global_modals = html.Div([
         ], style={"backgroundColor": CARD_BG, "color": COLOR_NEUTRAL, "maxHeight": "60vh", "overflowY": "auto", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
         dbc.ModalFooter(dbc.Button("CERRAR", id="close-tc", color="dark", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})
     ], id="modal-tc", is_open=False, size="lg", scrollable=True),
+    dbc.Modal([
+        dbc.ModalHeader("RECUPERAR CONTRASEÑA", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+        dbc.ModalBody([
+            html.P("Ingresá tu usuario y el email con el que te registraste. Si coinciden, vas a poder definir una contraseña nueva.", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+            dbc.Input(id="rec-u", placeholder="Usuario", className="mb-3", style=INPUT_STYLE),
+            dbc.Input(id="rec-e", placeholder="Email registrado", type="email", className="mb-3", style=INPUT_STYLE),
+            dbc.Input(id="rec-p1", placeholder="Nueva contraseña", type="password", className="mb-3", style=INPUT_STYLE),
+            dbc.Input(id="rec-p2", placeholder="Repetir nueva contraseña", type="password", style=INPUT_STYLE),
+            html.Div(id="rec-msg", className="mt-2", style={"fontSize": "0.85rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "minHeight": "20px"})
+        ], style={"backgroundColor": CARD_BG}),
+        dbc.ModalFooter([
+            dbc.Button("CANCELAR", id="close-recovery", color="dark", className="ms-auto", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+            dbc.Button("RESTABLECER", id="do-recovery", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": "#000"})
+        ], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})
+    ], id="modal-recovery", is_open=False),
     dbc.Modal([dbc.ModalHeader("CONFIGURACION DE ESTRATEGIA", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.ModalBody([html.P("Definí parámetros para clasificar cada operación según el motivo por el cual fue tomada (ej: Trend Following, Buy & Hold, Swing Trading). Esto permite distinguir los trades entre las distintas variantes de operatoria y analizar el desempeño de cada una por separado en la pestaña de Analytics. (Ej: Parámetro: Trend Following — Opciones: MA Crossover, ATH, BreakOut)", style={"color": COLOR_NEUTRAL, "fontSize": "0.82rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginBottom": "15px"}), dag.AgGrid(id="conf-grid", columnDefs=[{"field": "Parametro", "editable": True}, {"field": "Opciones", "editable": True, "flex": 1}], rowData=[], dashGridOptions={"rowSelection": "single", "stopEditingWhenCellsLoseFocus": True}, className="ag-theme-alpine-dark", style={"height": "300px", "borderRadius": "4px", **CUSTOM_GRID_STYLE}), dbc.Button("AGREGAR PARAMETRO", id="add-row-btn", color="dark", outline=True, size="sm", className="mt-3 w-100", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), html.Hr(style={"borderColor": BORDER_COLOR}), dbc.Row([dbc.Col(dbc.Label("MONEDA DE LA CUENTA", className="fw-bold", style={"color": COLOR_NEUTRAL, "fontSize": "0.8rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "paddingTop": "8px"}), width=6), dbc.Col(dbc.Select(id="conf-currency", options=[{"label": "Dólar (US$)", "value": "USD"}, {"label": "Peso Argentino (AR$)", "value": "ARS"}], value="USD", style=INPUT_STYLE), width=6)]), html.P("Define el símbolo de los valores en toda la app. Para cuentas en pesos usá tickers de BYMA/CEDEARs con sufijo .BA (ej: GGAL.BA, AAPL.BA).", style={"color": COLOR_NEUTRAL, "fontSize": "0.75rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginTop": "8px", "marginBottom": "0"}), html.Div(id="config-feedback", className="mt-2 text-warning small")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-config", color="dark", className="ms-auto", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.Button("GUARDAR", id="save-config", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-config", is_open=False, size="lg")
 ])
 
@@ -1111,7 +1127,8 @@ def layout_login():
                 dbc.Input(id="pass-in", placeholder="Password", type="password", className="mb-3 p-3", style=INPUT_STYLE),
                 html.Div(id="login-msg", style={"color": COLOR_NEG, "fontSize": "0.85rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "minHeight": "24px", "marginBottom": "10px", "textAlign": "center"}),
                 dbc.Button("INICIAR SESION", id="login-btn", color="success", className="w-100 mb-3 p-3 fw-bold", style={"backgroundColor": COLOR_POS, "color": "#000", "border": "none", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
-                dbc.Button("Crear Cuenta", id="open-reg", color="link", className="w-100 text-decoration-none", style={"color": COLOR_NEUTRAL, "fontFamily": "'Inter', 'Segoe UI', sans-serif"})
+                dbc.Button("Crear Cuenta", id="open-reg", color="link", className="w-100 text-decoration-none", style={"color": COLOR_NEUTRAL, "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+                dbc.Button("¿Olvidaste tu contraseña?", id="open-recovery", color="link", size="sm", className="w-100 text-decoration-none", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif"})
             ])
         ], style={"backgroundColor": CARD_BG, "border": f"1px solid {BORDER_COLOR}", "borderRadius": "6px", "boxShadow": "0 24px 60px rgba(0,0,0,0.6)", "width": "100%", "maxWidth": "420px"}),
         style={"minHeight": "85vh", "display": "flex", "alignItems": "center", "justifyContent": "center"}
@@ -1162,8 +1179,10 @@ app.layout = html.Div([
             # CAMBIO AQUI: Quitamos 'fw-bold' y agregamos 'fontWeight': 'normal'
             dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8),
             dbc.Col([
-                dbc.Button("CONFIG. ESTRATEGIA", id="open-config-btn", color="dark", className="me-3 fw-bold", style={"border": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), 
-                dbc.Button("SALIR", id="logout-btn", color="dark", outline=True, className="fw-bold", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": COLOR_NEUTRAL, "borderColor": BORDER_COLOR})
+                html.Div([
+                    dbc.Button("CONFIG. ESTRATEGIA", id="open-config-btn", color="dark", className="me-3 fw-bold", style={"border": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+                    dbc.Button("SALIR", id="logout-btn", color="dark", outline=True, className="fw-bold", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": COLOR_NEUTRAL, "borderColor": BORDER_COLOR})
+                ], id="header-actions", style={"display": "none"})
             ], width=4, className="mt-4 text-end")
         ]), 
         html.Div(id='page-content')
@@ -1210,8 +1229,11 @@ app.validation_layout = html.Div([
     dcc.Interval(id="perf-autoload"),
 ])
 # --- CALLBACKS CORE ---
-@app.callback(Output('page-content', 'children'), [Input('session-store', 'data')])
-def render_page(s): return layout_dashboard(s['user']) if s and 'user' in s else layout_login()
+@app.callback([Output('page-content', 'children'), Output('header-actions', 'style')], [Input('session-store', 'data')])
+def render_page(s):
+    logged_in = bool(s and 'user' in s)
+    # Los botones del header (CONFIG. ESTRATEGIA / SALIR) solo se ven con sesión activa
+    return (layout_dashboard(s['user']) if logged_in else layout_login()), ({"display": "block"} if logged_in else {"display": "none"})
 
 @app.callback(Output('header-pills', 'children'), [Input('header-interval', 'n_intervals'), Input('session-store', 'data')])
 def update_header_pills(_n, s):
@@ -1291,13 +1313,17 @@ def open_reg_modal(n_open):
     if n_open: return True, ""
     return no_update, no_update
 
-@app.callback([Output("modal-reg", "is_open", allow_duplicate=True), Output("reg-msg", "children", allow_duplicate=True)], [Input("close-reg", "n_clicks"), Input("do-reg", "n_clicks")], [State("reg-u", "value"), State("reg-p", "value"), State("reg-n", "value"), State("tc-accept", "value")], prevent_initial_call=True)
-def process_reg(n_close, n_do, user, password, name, tc_accepted):
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+@app.callback([Output("modal-reg", "is_open", allow_duplicate=True), Output("reg-msg", "children", allow_duplicate=True)], [Input("close-reg", "n_clicks"), Input("do-reg", "n_clicks")], [State("reg-u", "value"), State("reg-p", "value"), State("reg-n", "value"), State("reg-e", "value"), State("tc-accept", "value")], prevent_initial_call=True)
+def process_reg(n_close, n_do, user, password, name, email, tc_accepted):
     if ctx.triggered_id == "close-reg": return False, ""
     if ctx.triggered_id == "do-reg":
         if not user or not password: return True, "Faltan datos"
+        if not email or not EMAIL_RE.match(str(email).strip()):
+            return True, "Ingresá un email válido (lo vas a necesitar para recuperar tu contraseña)."
         if not tc_accepted: return True, "Debés aceptar los Términos y Condiciones para crear tu cuenta."
-        success, msg = db.register_user(user, password, name or "")
+        success, msg = db.register_user(user, password, name or "", email)
         return (False, "") if success else (True, msg)
     return no_update, no_update
 
@@ -1305,6 +1331,38 @@ def process_reg(n_close, n_do, user, password, name, tc_accepted):
 @app.callback(Output("modal-tc", "is_open"), [Input("open-tc", "n_clicks"), Input("close-tc", "n_clicks")], State("modal-tc", "is_open"), prevent_initial_call=True)
 def toggle_tc_modal(n_open, n_close, is_open):
     return not is_open
+
+# --- RECUPERACIÓN DE CONTRASEÑA ---
+@app.callback(
+    [Output("modal-recovery", "is_open"), Output("rec-msg", "children"), Output("rec-msg", "style")],
+    [Input("open-recovery", "n_clicks"), Input("close-recovery", "n_clicks"), Input("do-recovery", "n_clicks")],
+    [State("rec-u", "value"), State("rec-e", "value"), State("rec-p1", "value"), State("rec-p2", "value")],
+    prevent_initial_call=True
+)
+def process_recovery(n_open, n_close, n_do, user, email, p1, p2):
+    msg_err = {"color": COLOR_NEG, "fontSize": "0.85rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "minHeight": "20px"}
+    msg_ok = {"color": COLOR_POS, "fontSize": "0.85rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "minHeight": "20px"}
+    trig = ctx.triggered_id
+    if trig == "open-recovery":
+        return True, "", msg_err
+    if trig == "close-recovery":
+        return False, "", msg_err
+    if trig == "do-recovery":
+        if not user or not email or not p1 or not p2:
+            return True, "Completá todos los campos.", msg_err
+        if p1 != p2:
+            return True, "Las contraseñas no coinciden.", msg_err
+        if len(p1) < 6:
+            return True, "La contraseña nueva debe tener al menos 6 caracteres.", msg_err
+        record = db.get_user(user)
+        stored_email = (record or {}).get('email') or ""
+        # Mensaje genérico si no coincide: no revelar si el usuario existe o cuál es su email
+        if not record or not stored_email or stored_email.strip().lower() != str(email).strip().lower():
+            return True, "Los datos no coinciden con ninguna cuenta recuperable.", msg_err
+        if not db.update_user_password(user, p1):
+            return True, "Error al actualizar la contraseña. Probá de nuevo.", msg_err
+        return True, "✓ Contraseña actualizada. Ya podés iniciar sesión.", msg_ok
+    return no_update, no_update, no_update
 
 @app.callback([Output("modal-config", "is_open"), Output("conf-grid", "rowData"), Output("session-store", "data", allow_duplicate=True), Output("config-feedback", "children"), Output("conf-currency", "value")], [Input("open-config-btn", "n_clicks"), Input("close-config", "n_clicks"), Input("save-config", "n_clicks"), Input("add-row-btn", "n_clicks")], [State("modal-config", "is_open"), State("conf-grid", "rowData"), State("conf-currency", "value"), State("session-store", "data")], prevent_initial_call=True)
 def config_modal(n1, n2, n3, n4, is_open, rows, currency, session):
