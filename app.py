@@ -84,7 +84,9 @@ EODHD_API_KEY = "demo"
 
 db.init_db()
 
-GOOGLE_FONTS = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+GOOGLE_FONTS = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Michroma&display=swap"
+# Fuente display (marca y títulos de sección); Inter queda para UI y datos
+FONT_DISPLAY = "'Michroma', 'Inter', sans-serif"
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG, GOOGLE_FONTS], suppress_callback_exceptions=True)
 app.title = "Edge Journal"
 server = app.server
@@ -106,12 +108,12 @@ KPI_LBL_STYLE = {"fontSize": "0.70rem", "color": COLOR_NEUTRAL, "textTransform":
 SCROLL_CONTAINER_STYLE = {"overflowX": "auto", "whiteSpace": "nowrap", "paddingBottom": "15px", "scrollbarWidth": "thin"}
 
 TAB_STYLE = {
-    "backgroundColor": BG_COLOR, "color": COLOR_NEUTRAL, "border": "none", 
-    "borderBottom": f"1px solid {BORDER_COLOR}", "padding": "15px", "fontWeight": "bold", "cursor": "pointer", "fontFamily": "'Inter', 'Segoe UI', sans-serif"
+    "backgroundColor": BG_COLOR, "color": COLOR_NEUTRAL, "border": "none",
+    "borderBottom": f"1px solid {BORDER_COLOR}", "padding": "15px 10px", "fontSize": "0.72rem", "letterSpacing": "0.5px", "cursor": "pointer", "fontFamily": FONT_DISPLAY
 }
 TAB_SELECTED_STYLE = {
     "backgroundColor": BG_COLOR, "color": TEXT_MAIN, "border": "none",
-    "borderBottom": f"3px solid {COLOR_POS}", "padding": "15px", "fontWeight": "bold", "cursor": "pointer", "fontFamily": "'Inter', 'Segoe UI', sans-serif"
+    "borderBottom": f"3px solid {COLOR_POS}", "padding": "15px 10px", "fontSize": "0.72rem", "letterSpacing": "0.5px", "cursor": "pointer", "fontFamily": FONT_DISPLAY
 }
 
 # Botones de período de Performance: estilo base y activo
@@ -1121,7 +1123,7 @@ def layout_login():
     return html.Div(
         dbc.Card([
             dbc.CardBody([
-                html.H2("EDGE JOURNAL", className="text-center mb-1 fw-bold", style={"color": TEXT_MAIN, "letterSpacing": "3px", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "textShadow": f"0 0 24px {COLOR_POS}44"}),
+                html.H2("EDGE JOURNAL", className="text-center mb-1", style={"color": TEXT_MAIN, "letterSpacing": "2px", "fontSize": "1.55rem", "fontFamily": FONT_DISPLAY, "textShadow": f"0 0 24px {COLOR_POS}44"}),
                 html.P("Trading journal & analytics", className="text-center", style={"color": COLOR_NEUTRAL, "fontSize": "0.8rem", "letterSpacing": "1px", "marginBottom": "28px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
                 dbc.Input(id="user-in", placeholder="Usuario", className="mb-3 p-3", style=INPUT_STYLE),
                 dbc.Input(id="pass-in", placeholder="Password", type="password", className="mb-3 p-3", style=INPUT_STYLE),
@@ -1177,7 +1179,7 @@ app.layout = html.Div([
     dbc.Container([
         dbc.Row([
             # CAMBIO AQUI: Quitamos 'fw-bold' y agregamos 'fontWeight': 'normal'
-            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8),
+            dbc.Col(html.H2("EDGE JOURNAL", className="my-4", style={"color": TEXT_MAIN, "fontWeight": "normal", "letterSpacing": "1px", "fontSize": "1.6rem", "fontFamily": FONT_DISPLAY, "textShadow": f"0 0 20px {COLOR_POS}33"}), width=8),
             dbc.Col([
                 html.Div([
                     dbc.Button("CONFIG. ESTRATEGIA", id="open-config-btn", color="dark", className="me-3 fw-bold", style={"border": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
@@ -1458,7 +1460,7 @@ def render_tab(tab, session):
             ], width=5), 
             dbc.Col([
                 dbc.Row([
-                    dbc.Col(html.H5("POSICIONES ACTIVAS", className="fw-bold mb-3", style={"color": TEXT_MAIN}), width=8),
+                    dbc.Col(html.H5("POSICIONES ACTIVAS", className="mb-3", style={"color": TEXT_MAIN, "fontSize": "0.92rem", "letterSpacing": "1px", "fontFamily": FONT_DISPLAY}), width=8),
                     dbc.Col(dbc.RadioItems(
                         id="pnl-mode-toggle",
                         options=[{"label": "$", "value": "$"}, {"label": "%", "value": "%"}],
@@ -1474,7 +1476,7 @@ def render_tab(tab, session):
                 html.Div(dag.AgGrid(id="open-grid", rowData=format_df(df, conf), columnDefs=cols, dashGridOptions={"rowSelection": "single", "pagination": True, "paginationPageSize": 10}, className="ag-theme-alpine-dark", style={"height": "350px", "width": "100%", **CUSTOM_GRID_STYLE}), style={"borderRadius": "4px", "overflow": "hidden", "border": "none", "boxShadow": "0 10px 30px rgba(0,0,0,0.3)"}),
                 html.Hr(style={"borderColor": BORDER_COLOR, "margin": "30px 0"}),
                 dbc.Row([
-                    dbc.Col(html.H5("EXPOSICION ACTUAL", className="fw-bold mb-3", style={"color": TEXT_MAIN}), width=8),
+                    dbc.Col(html.H5("EXPOSICION ACTUAL", className="mb-3", style={"color": TEXT_MAIN, "fontSize": "0.92rem", "letterSpacing": "1px", "fontFamily": FONT_DISPLAY}), width=8),
                     dbc.Col(dcc.Dropdown(id='live-chart-mode-selector', options=[{'label': 'TOTAL PORTFOLIO', 'value': 'TOTAL'}, {'label': 'POR ACTIVO', 'value': 'SYMBOL'}], value='TOTAL', clearable=False, style=DROPDOWN_STYLE), width=4)
                 ]),
                 html.Div(dcc.Graph(id="fig-live-risk", style={'height': '300px'}), style={"borderRadius": "4px", "overflow": "hidden", "border": f"1px solid {BORDER_COLOR}", "boxShadow": "0 4px 12px rgba(0,0,0,0.15)"})
@@ -1527,7 +1529,7 @@ def render_tab(tab, session):
         
         return html.Div([
             dbc.Row([
-                dbc.Col(html.H4("METRICAS DE SISTEMA", style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), width=9),
+                dbc.Col(html.H4("METRICAS DE SISTEMA", style={"color": TEXT_MAIN, "marginTop": "20px", "fontSize": "1.05rem", "letterSpacing": "1px", "fontFamily": FONT_DISPLAY}), width=9),
                 dbc.Col(dbc.InputGroup([dbc.InputGroupText(f"CAPITAL INICIAL ({cur_sym(conf)})", style={"backgroundColor": BORDER_COLOR, "color": COLOR_NEUTRAL, "border": "none", "fontWeight": "bold", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "fontSize": "12px"}), dbc.Input(id="initial-balance-input", type="number", value=saved_bal, debounce=True, style=INPUT_STYLE)]), width=3)
             ], className="mb-4 align-items-center"),
             dcc.Loading(id="loading-analytics", type="default", color=COLOR_NEUTRAL, children=html.Div([
@@ -1558,7 +1560,7 @@ def render_tab(tab, session):
     elif tab == 'tab-montecarlo':
         return html.Div([
             dbc.Row([
-                dbc.Col([html.H4("SIMULADOR DE MONTECARLO", style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), html.P("Generador de escenarios  basado en distr. de R.", className="text-muted"), html.P("Se recomienda un mínimo de 50/100 operaciones para realizar la simulación.", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginTop": "-8px"})], width=6),
+                dbc.Col([html.H4("SIMULADOR DE MONTECARLO", style={"color": TEXT_MAIN, "marginTop": "20px", "fontSize": "1.05rem", "letterSpacing": "1px", "fontFamily": FONT_DISPLAY}), html.P("Generador de escenarios  basado en distr. de R.", className="text-muted"), html.P("Se recomienda un mínimo de 50/100 operaciones para realizar la simulación.", style={"color": COLOR_NEUTRAL, "fontSize": "0.78rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginTop": "-8px"})], width=6),
                 dbc.Col([dbc.Label("N° Iteraciones", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-n-sim", type="number", value=3000, min=100, max=10000, style=INPUT_STYLE)], width=3),
                 dbc.Col([dbc.Label("Kelly Fraction (f*)", className="fw-bold", style={"color": COLOR_NEUTRAL}), dbc.Input(id="mc-kelly-frac", type="number", value=1.0, min=0.1, max=2.0, step=0.01, style=INPUT_STYLE)], width=3),
             ], className="mb-4 align-items-center"),
@@ -1586,8 +1588,8 @@ def render_tab(tab, session):
         return dbc.Container([
             # Título
             dbc.Row([
-                dbc.Col(html.H4("RETORNO ACUMULADO DEL PORTFOLIO", 
-                               style={"color": TEXT_MAIN, "marginTop": "20px", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}))
+                dbc.Col(html.H4("RETORNO ACUMULADO DEL PORTFOLIO",
+                               style={"color": TEXT_MAIN, "marginTop": "20px", "fontSize": "1.05rem", "letterSpacing": "1px", "fontFamily": FONT_DISPLAY}))
             ]),
             
             # Controles: botones de periodo + benchmark + indicador de capital
@@ -1731,7 +1733,7 @@ def render_tab(tab, session):
         return html.Div([
             dbc.Row([
                 dbc.Col([
-                    html.H3("MANUAL DE USUARIO", className="mb-4", style={"color": TEXT_MAIN, "letterSpacing": "1px"}),
+                    html.H3("MANUAL DE USUARIO", className="mb-4", style={"color": TEXT_MAIN, "letterSpacing": "1px", "fontSize": "1.2rem", "fontFamily": FONT_DISPLAY}),
                     
                     # --- SECCION 1: OBJETIVOS ---
                     dbc.Card([
