@@ -1064,7 +1064,40 @@ def get_management_panel():
 
 # --- SHELL Y MODALES ---
 global_modals = html.Div([
-    dbc.Modal([dbc.ModalHeader("REGISTRO DE USUARIO", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.ModalBody([dbc.Input(id="reg-u", placeholder="Usuario", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-p", placeholder="Contraseña", type="password", className="mb-3", style=INPUT_STYLE), dbc.Input(id="reg-n", placeholder="Nombre Completo", style=INPUT_STYLE), html.Div(id="reg-msg", className="text-danger mt-2")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-reg", color="dark", className="ms-auto", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.Button("ACEPTAR", id="do-reg", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-reg", is_open=False),
+    dbc.Modal([dbc.ModalHeader("REGISTRO DE USUARIO", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.ModalBody([
+        dbc.Input(id="reg-u", placeholder="Usuario", className="mb-3", style=INPUT_STYLE),
+        dbc.Input(id="reg-p", placeholder="Contraseña", type="password", className="mb-3", style=INPUT_STYLE),
+        dbc.Input(id="reg-n", placeholder="Nombre Completo", className="mb-3", style=INPUT_STYLE),
+        html.Div([
+            dbc.Checkbox(id="tc-accept", value=False, style={"display": "inline-block", "marginRight": "8px"}),
+            html.Span("Leí y acepto los ", style={"color": COLOR_NEUTRAL, "fontSize": "0.85rem"}),
+            html.A("Términos y Condiciones", id="open-tc", href="#", style={"color": COLOR_POS, "fontSize": "0.85rem", "textDecoration": "underline", "cursor": "pointer"})
+        ], style={"display": "flex", "alignItems": "center", "flexWrap": "wrap", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+        html.Div(id="reg-msg", className="text-danger mt-2")
+    ], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-reg", color="dark", className="ms-auto", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.Button("ACEPTAR", id="do-reg", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-reg", is_open=False),
+    dbc.Modal([
+        dbc.ModalHeader("TÉRMINOS Y CONDICIONES", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+        dbc.ModalBody([
+            html.P("Última actualización: julio 2026", style={"color": COLOR_NEUTRAL, "fontSize": "0.75rem"}),
+            html.H6("1. Aceptación", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("Al crear una cuenta en Edge Journal aceptás estos términos. Si no estás de acuerdo, no utilices la plataforma.", className="small"),
+            html.H6("2. Naturaleza del servicio", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("Edge Journal es una herramienta de registro y análisis de operaciones bursátiles con fines informativos y educativos. NO constituye asesoramiento financiero, recomendación de inversión ni oferta de compra o venta de ningún instrumento. Toda decisión de inversión es exclusiva responsabilidad del usuario.", className="small"),
+            html.H6("3. Datos que registrás", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("Para funcionar, la plataforma almacena la información que vos cargás: usuario, nombre, capital de referencia, operaciones (activos, precios, cantidades, fechas, notas), aportes y retiros, y parámetros de estrategia. Esta información se guarda en una base de datos gestionada (Supabase) y se usa únicamente para brindarte las funcionalidades de la plataforma.", className="small"),
+            html.H6("4. Privacidad", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("Tus datos no se venden, alquilan ni comparten con terceros. Solo son accesibles desde tu cuenta. Podés solicitar la eliminación completa de tu cuenta y sus datos en cualquier momento.", className="small"),
+            html.H6("5. Datos de mercado", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("Los precios y cotizaciones provienen de fuentes de terceros (Yahoo Finance) y pueden contener demoras, errores u omisiones. No se garantiza su exactitud ni disponibilidad. Los cálculos de rendimiento derivados son estimaciones y pueden diferir de los valores oficiales de tu broker.", className="small"),
+            html.H6("6. Limitación de responsabilidad", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("La plataforma se ofrece \"tal cual\", sin garantías de ningún tipo. No nos responsabilizamos por pérdidas o daños derivados del uso de la plataforma, de decisiones de inversión tomadas en base a su información, ni por interrupciones del servicio o pérdida de datos.", className="small"),
+            html.H6("7. Seguridad de la cuenta", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("Sos responsable de mantener la confidencialidad de tus credenciales. Evitá reutilizar contraseñas de otros servicios.", className="small"),
+            html.H6("8. Modificaciones", style={"color": TEXT_MAIN, "marginTop": "12px"}),
+            html.P("Estos términos pueden actualizarse. El uso continuado de la plataforma tras una modificación implica su aceptación.", className="small"),
+        ], style={"backgroundColor": CARD_BG, "color": COLOR_NEUTRAL, "maxHeight": "60vh", "overflowY": "auto", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}),
+        dbc.ModalFooter(dbc.Button("CERRAR", id="close-tc", color="dark", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})
+    ], id="modal-tc", is_open=False, size="lg", scrollable=True),
     dbc.Modal([dbc.ModalHeader("CONFIGURACION DE ESTRATEGIA", style={"backgroundColor": CARD_BG, "color": TEXT_MAIN, "borderBottom": f"1px solid {BORDER_COLOR}", "fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.ModalBody([html.P("Definí parámetros para clasificar cada operación según el motivo por el cual fue tomada (ej: Trend Following, Buy & Hold, Swing Trading). Esto permite distinguir los trades entre las distintas variantes de operatoria y analizar el desempeño de cada una por separado en la pestaña de Analytics. (Ej: Parámetro: Trend Following — Opciones: MA Crossover, ATH, BreakOut)", style={"color": COLOR_NEUTRAL, "fontSize": "0.82rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginBottom": "15px"}), dag.AgGrid(id="conf-grid", columnDefs=[{"field": "Parametro", "editable": True}, {"field": "Opciones", "editable": True, "flex": 1}], rowData=[], dashGridOptions={"rowSelection": "single", "stopEditingWhenCellsLoseFocus": True}, className="ag-theme-alpine-dark", style={"height": "300px", "borderRadius": "4px", **CUSTOM_GRID_STYLE}), dbc.Button("AGREGAR PARAMETRO", id="add-row-btn", color="dark", outline=True, size="sm", className="mt-3 w-100", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), html.Hr(style={"borderColor": BORDER_COLOR}), dbc.Row([dbc.Col(dbc.Label("MONEDA DE LA CUENTA", className="fw-bold", style={"color": COLOR_NEUTRAL, "fontSize": "0.8rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "paddingTop": "8px"}), width=6), dbc.Col(dbc.Select(id="conf-currency", options=[{"label": "Dólar (US$)", "value": "USD"}, {"label": "Peso Argentino (AR$)", "value": "ARS"}], value="USD", style=INPUT_STYLE), width=6)]), html.P("Define el símbolo de los valores en toda la app. Para cuentas en pesos usá tickers de BYMA/CEDEARs con sufijo .BA (ej: GGAL.BA, AAPL.BA).", style={"color": COLOR_NEUTRAL, "fontSize": "0.75rem", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "marginTop": "8px", "marginBottom": "0"}), html.Div(id="config-feedback", className="mt-2 text-warning small")], style={"backgroundColor": CARD_BG}), dbc.ModalFooter([dbc.Button("CANCELAR", id="close-config", color="dark", className="ms-auto", style={"fontFamily": "'Inter', 'Segoe UI', sans-serif"}), dbc.Button("GUARDAR", id="save-config", color="success", style={"backgroundColor": COLOR_POS, "border": "none", "fontFamily": "'Inter', 'Segoe UI', sans-serif", "color": "#000"})], style={"backgroundColor": CARD_BG, "borderTop": f"1px solid {BORDER_COLOR}"})], id="modal-config", is_open=False, size="lg")
 ])
 
@@ -1258,14 +1291,20 @@ def open_reg_modal(n_open):
     if n_open: return True, ""
     return no_update, no_update
 
-@app.callback([Output("modal-reg", "is_open", allow_duplicate=True), Output("reg-msg", "children", allow_duplicate=True)], [Input("close-reg", "n_clicks"), Input("do-reg", "n_clicks")], [State("reg-u", "value"), State("reg-p", "value"), State("reg-n", "value")], prevent_initial_call=True)
-def process_reg(n_close, n_do, user, password, name):
+@app.callback([Output("modal-reg", "is_open", allow_duplicate=True), Output("reg-msg", "children", allow_duplicate=True)], [Input("close-reg", "n_clicks"), Input("do-reg", "n_clicks")], [State("reg-u", "value"), State("reg-p", "value"), State("reg-n", "value"), State("tc-accept", "value")], prevent_initial_call=True)
+def process_reg(n_close, n_do, user, password, name, tc_accepted):
     if ctx.triggered_id == "close-reg": return False, ""
     if ctx.triggered_id == "do-reg":
         if not user or not password: return True, "Faltan datos"
+        if not tc_accepted: return True, "Debés aceptar los Términos y Condiciones para crear tu cuenta."
         success, msg = db.register_user(user, password, name or "")
         return (False, "") if success else (True, msg)
     return no_update, no_update
+
+# --- MODAL TÉRMINOS Y CONDICIONES ---
+@app.callback(Output("modal-tc", "is_open"), [Input("open-tc", "n_clicks"), Input("close-tc", "n_clicks")], State("modal-tc", "is_open"), prevent_initial_call=True)
+def toggle_tc_modal(n_open, n_close, is_open):
+    return not is_open
 
 @app.callback([Output("modal-config", "is_open"), Output("conf-grid", "rowData"), Output("session-store", "data", allow_duplicate=True), Output("config-feedback", "children"), Output("conf-currency", "value")], [Input("open-config-btn", "n_clicks"), Input("close-config", "n_clicks"), Input("save-config", "n_clicks"), Input("add-row-btn", "n_clicks")], [State("modal-config", "is_open"), State("conf-grid", "rowData"), State("conf-currency", "value"), State("session-store", "data")], prevent_initial_call=True)
 def config_modal(n1, n2, n3, n4, is_open, rows, currency, session):
