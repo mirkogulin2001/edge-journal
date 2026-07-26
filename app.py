@@ -1418,20 +1418,30 @@ def save_balance_change(bal, session):
         return session
     return no_update
 
+def _ag_money_fmt(sym):
+    """JS expression for AG Grid valueFormatter: $1,234.56 / -$1,234.56"""
+    return f"params.value == null ? '' : params.value < 0 ? '-{sym}' + Math.abs(params.value).toFixed(2).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',') : '{sym}' + Number(params.value).toFixed(2).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',')"
+
+def _ag_price_fmt(sym):
+    """JS expression for AG Grid valueFormatter: $1,234.56 (always positive)"""
+    return f"params.value == null ? '' : '{sym}' + Number(params.value).toFixed(2).replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ',')"
+
+_AG_PCT_FMT = "params.value == null ? '' : Number(params.value).toFixed(2) + '%'"
+_AG_R_FMT = "params.value == null ? '' : Number(params.value).toFixed(2) + 'R'"
+
 def build_open_grid_cols(conf, mode="$"):
     """Columnas del grid de posiciones activas. mode '$' muestra PnL/Riesgo en
     valor absoluto; mode '%' los muestra en porcentaje sobre el costo de la posición."""
     sym = cur_sym(conf)
-    money_fmt = f"params.value < 0 ? '-{sym}' + Math.abs(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}}) : '{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
-    pct_fmt = "Number(params.value).toFixed(2) + '%'"
+    money_fmt = _ag_money_fmt(sym)
+    price_fmt = _ag_price_fmt(sym)
     dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k not in RESERVED_CONFIG_KEYS] if isinstance(conf, dict) else []
     if mode == "%":
-        pnl_col = {"field": "unrealized_pnl_pct", "headerName": "PnL (%)", "width": 100, "valueFormatter": {"function": pct_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
-        risk_col = {"field": "open_risk_pct", "headerName": "Riesgo (%)", "width": 100, "valueFormatter": {"function": pct_fmt}, "cellStyle": {'color': COLOR_NEG}}
+        pnl_col = {"field": "unrealized_pnl_pct", "headerName": "PnL (%)", "width": 100, "valueFormatter": {"function": _AG_PCT_FMT}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
+        risk_col = {"field": "open_risk_pct", "headerName": "Riesgo (%)", "width": 100, "valueFormatter": {"function": _AG_PCT_FMT}, "cellStyle": {'color': COLOR_NEG}}
     else:
         pnl_col = {"field": "unrealized_pnl", "headerName": f"PnL ({sym})", "width": 100, "valueFormatter": {"function": money_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
         risk_col = {"field": "open_risk", "headerName": f"Riesgo ({sym})", "width": 100, "valueFormatter": {"function": money_fmt}, "cellStyle": {'color': COLOR_NEG}}
-    price_fmt = f"'{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
     return [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 70}] + dyn_cols + [{"field": "entry_price", "headerName": "In", "width": 100, "valueFormatter": {"function": price_fmt}}, {"field": "current_price", "headerName": "Live", "width": 100, "valueFormatter": {"function": price_fmt}, "cellStyle": {'fontWeight': 'bold'}}, pnl_col, risk_col, {"field": "current_stop_loss", "headerName": "SL Act", "width": 100, "valueFormatter": {"function": price_fmt}, "editable": True, "cellStyle": {'color': TEXT_MAIN, 'fontWeight': 'bold', 'backgroundColor': '#2B3139'}}]
 
 def render_tab(tab, session):
@@ -1509,12 +1519,10 @@ def render_tab(tab, session):
             df['visual_id'] = []
             
         sym = cur_sym(conf)
-        h_money_fmt = f"params.value < 0 ? '-{sym}' + Math.abs(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}}) : '{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
-        h_price_fmt = f"'{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
-        h_pct_fmt = "Number(params.value).toFixed(2) + '%'"
-        h_r_fmt = "Number(params.value).toFixed(2) + 'R'"
+        h_money_fmt = _ag_money_fmt(sym)
+        h_price_fmt = _ag_price_fmt(sym)
         dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k not in RESERVED_CONFIG_KEYS] if isinstance(conf, dict) else []
-        cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "visual_id", "headerName": "#", "width": 60, "sortable": True}, {"field": "entry_date", "width": 100}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 80}, {"field": "result_type", "width": 70}, {"field": "entry_price", "width": 100, "valueFormatter": {"function": h_price_fmt}}, {"field": "exit_price", "width": 100, "valueFormatter": {"function": h_price_fmt}}, {"field": "initial_stop_loss", "width": 90, "valueFormatter": {"function": h_price_fmt}}, {"field": "current_stop_loss", "width": 90, "valueFormatter": {"function": h_price_fmt}}] + dyn_cols + [{"field": "rr", "headerName": "R", "width": 80, "valueFormatter": {"function": h_r_fmt}}, {"field": "pnl", "headerName": f"PnL ({sym})", "width": 100, "valueFormatter": {"function": h_money_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, {"field": "pnl_pct", "headerName": "PnL %", "width": 90, "valueFormatter": {"function": h_pct_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}},
+        cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "visual_id", "headerName": "#", "width": 60, "sortable": True}, {"field": "entry_date", "width": 100}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 80}, {"field": "result_type", "width": 70}, {"field": "entry_price", "width": 100, "valueFormatter": {"function": h_price_fmt}}, {"field": "exit_price", "width": 100, "valueFormatter": {"function": h_price_fmt}}, {"field": "initial_stop_loss", "width": 90, "valueFormatter": {"function": h_price_fmt}}, {"field": "current_stop_loss", "width": 90, "valueFormatter": {"function": h_price_fmt}}] + dyn_cols + [{"field": "rr", "headerName": "R", "width": 80, "valueFormatter": {"function": _AG_R_FMT}}, {"field": "pnl", "headerName": f"PnL ({sym})", "width": 100, "valueFormatter": {"function": h_money_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, {"field": "pnl_pct", "headerName": "PnL %", "width": 90, "valueFormatter": {"function": _AG_PCT_FMT}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}},
                 # --- NOTAS ---
                 {"field": "entry_notes", "headerName": "Notas Entrada", "width": 200, "editable": True, "cellEditor": "agLargeTextCellEditor"},
                 {"field": "exit_notes", "headerName": "Notas Salida", "width": 200, "editable": True, "cellEditor": "agLargeTextCellEditor"},
@@ -1725,7 +1733,7 @@ def render_tab(tab, session):
                             columnDefs=[
                                 {"field": "id", "checkboxSelection": True, "width": 70},
                                 {"field": "movement_date", "headerName": "Fecha", "width": 130},
-                                {"field": "amount", "headerName": f"Monto ({cur_sym(conf)})", "width": 140, "valueFormatter": {"function": f"'{cur_sym(conf)}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"}},
+                                {"field": "amount", "headerName": f"Monto ({cur_sym(conf)})", "width": 140, "valueFormatter": {"function": _ag_price_fmt(cur_sym(conf))}},
                                 {"field": "movement_type", "headerName": "Tipo", "flex": 1, "cellStyle": {"styleConditions": [
                                     {"condition": "params.value=='APORTE'", "style": {"color": COLOR_POS}},
                                     {"condition": "params.value=='RETIRO'", "style": {"color": COLOR_NEG}}
