@@ -624,7 +624,8 @@ def run_monte_carlo_simulation(df_closed, n_simulations, kelly_fraction, trades_
         xaxis_title="Fraccion de Riesgo (f)",
         yaxis_title="Tasa de crecimiento geometrico esperado (%)",
         showlegend=False,
-        margin=dict(l=20, r=20, t=40, b=20)
+        margin=dict(l=20, r=20, t=40, b=20),
+        yaxis=dict(ticksuffix='%')
     )
     fig_kelly = style_fig(fig_kelly)
 
@@ -669,6 +670,7 @@ def run_monte_carlo_simulation(df_closed, n_simulations, kelly_fraction, trades_
     fig_ret.add_trace(go.Scatter(x=[mean_ret, mean_ret], y=[0, max_y_ret], mode='lines', name=f'Media: {mean_ret:.1f}%', line=dict(color=COLOR_NEG, dash='dash', width=2)))
     fig_ret.add_trace(go.Scatter(x=[med_ret, med_ret], y=[0, max_y_ret], mode='lines', name=f'Mediana: {med_ret:.1f}%', line=dict(color='orange', dash='dot', width=2)))
     fig_ret = style_fig(fig_ret)
+    fig_ret.update_layout(xaxis=dict(ticksuffix='%'))
 
     # --- GRAFICO DRAWDOWN ---
     bins_dd = calc_fd_bins(max_dd)
@@ -678,8 +680,9 @@ def run_monte_carlo_simulation(df_closed, n_simulations, kelly_fraction, trades_
     max_y_dd = get_max_y(max_dd, bins_dd)
     fig_dd.add_trace(go.Scatter(x=[mean_dd, mean_dd], y=[0, max_y_dd], mode='lines', name=f'Media: {mean_dd:.1f}%', line=dict(color=COLOR_POS, dash='dash', width=2)))
     fig_dd.add_trace(go.Scatter(x=[med_dd, med_dd], y=[0, max_y_dd], mode='lines', name=f'Mediana: {med_dd:.1f}%', line=dict(color='yellow', dash='dot', width=2)))
-    fig_dd.add_trace(go.Scatter(x=[p05_dd, p05_dd], y=[0, max_y_dd], mode='lines', name=f'Peor 5%: {p05_dd:.1f}%', line=dict(color='cyan', width=3))) 
+    fig_dd.add_trace(go.Scatter(x=[p05_dd, p05_dd], y=[0, max_y_dd], mode='lines', name=f'Peor 5%: {p05_dd:.1f}%', line=dict(color='cyan', width=3)))
     fig_dd = style_fig(fig_dd)
+    fig_dd.update_layout(xaxis=dict(ticksuffix='%'))
 
     # --- GRAFICO CURVAS ---
     fig_eq = go.Figure()
@@ -818,21 +821,23 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         
         fig_eq.update_layout(
             margin=dict(t=40, b=0, l=20, r=20),
-            yaxis_range=[min_eq - pad, max_eq + pad]
+            yaxis_range=[min_eq - pad, max_eq + pad],
+            yaxis=dict(tickprefix=cur_sym(user_config), tickformat=",.0f")
         )
-        
+        fig_eq.update_traces(hovertemplate='Trade %{x}<br>' + cur_sym(user_config) + '%{y:,.2f}<extra></extra>')
+
         # --- DRAWDOWN ---
         fig_dd = px.area(df_closed, x='trade_num', y='dd', title='DRAWDOWN (%)', template='plotly_dark')
         fig_dd.update_traces(line_color=COLOR_NEG, fillcolor=f'rgba(246, 70, 93, 0.2)')
         fig_dd = style_fig(fig_dd)
-        fig_dd.update_layout(height=200, margin=dict(t=10, b=20, l=20, r=20))
+        fig_dd.update_layout(height=200, margin=dict(t=10, b=20, l=20, r=20), yaxis=dict(ticksuffix='%'))
         
         # --- NUEVOS GRAFICOS ---
         fig_evo_winrate = go.Figure()
         fig_evo_winrate.add_trace(go.Scatter(x=df_closed['trade_num'], y=df_closed['cum_win_rate'], mode='lines', name='Win Rate', line=dict(color=COLOR_POS, width=2)))
         fig_evo_winrate.add_trace(go.Scatter(x=df_closed['trade_num'], y=df_closed['cum_loss_rate'], mode='lines', name='Loss Rate', line=dict(color=COLOR_NEG, width=2)))
         fig_evo_winrate.add_trace(go.Scatter(x=df_closed['trade_num'], y=df_closed['cum_be_rate'], mode='lines', name='BE Rate', line=dict(color=COLOR_NEUTRAL, width=2)))
-        fig_evo_winrate.update_layout(title='EVOLUCION TASAS (%)', xaxis_title='Trades', yaxis_title='%', hovermode='x unified', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        fig_evo_winrate.update_layout(title='EVOLUCION TASAS (%)', xaxis_title='Trades', yaxis_title='%', hovermode='x unified', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), yaxis=dict(ticksuffix='%'))
         fig_evo_winrate = style_fig(fig_evo_winrate)
 
         fig_evo_ratio = go.Figure()
@@ -868,11 +873,12 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
         )
         
         fig_edge.update_layout(
-            title='EVOLUCION DEL EDGE (ESPERANZA EN R)', 
-            xaxis_title='Trades', 
-            yaxis_title='Esperanza (R)', 
-            hovermode='x unified', 
-            showlegend=False
+            title='EVOLUCION DEL EDGE (ESPERANZA EN R)',
+            xaxis_title='Trades',
+            yaxis_title='Esperanza (R)',
+            hovermode='x unified',
+            showlegend=False,
+            yaxis=dict(ticksuffix='R')
         )
         fig_edge = style_fig(fig_edge)
 
@@ -923,7 +929,7 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
                            title='DISTRIBUCION PNL', template='plotly_dark')
             fig_h.update_traces(marker_line_color=CARD_BG, marker_line_width=1.5, textposition='outside', textfont_color=TEXT_MAIN) 
             fig_h = style_fig(fig_h)
-            fig_h.update_layout(bargap=0.05, bargroupgap=0.02, xaxis_title="Rango de PnL ($)", yaxis_title="Cantidad de Trades")
+            fig_h.update_layout(bargap=0.05, bargroupgap=0.02, xaxis_title=f"Rango de PnL ({cur_sym(user_config)})", yaxis_title="Cantidad de Trades")
         else:
             fig_h = empty
 
@@ -970,21 +976,25 @@ def get_analytics_figures(df_closed, df_open, start_bal, user_config, selected_m
             if color: val_s['color'] = color
             return dbc.Col(html.Div([html.P(val, style=val_s), html.P(label, style=KPI_LBL_STYLE)], style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
         
+        a_s = cur_sym(user_config)
+        def a_fmt_money(v):
+            return f"-{a_s}{abs(v):,.0f}" if v < 0 else f"{a_s}{v:,.0f}"
+        def a_fmt_money2(v):
+            return f"-{a_s}{abs(v):,.2f}" if v < 0 else f"{a_s}{v:,.2f}"
+
         kpis = html.Div(dbc.Row([
-            make_card(f"{cur_sym(user_config)}{total_pnl:,.0f}", "PNL", COLOR_POS if total_pnl>=0 else COLOR_NEG),
-            make_card(f"{len(df_closed)}", "TRADES"), 
-            make_card(f"{n_wins}", "WINS", COLOR_POS), 
-            make_card(f"{n_losses}", "LOSSES", COLOR_NEG), 
+            make_card(a_fmt_money(total_pnl), "PNL", COLOR_POS if total_pnl>=0 else COLOR_NEG),
+            make_card(f"{len(df_closed)}", "TRADES"),
+            make_card(f"{n_wins}", "WINS", COLOR_POS),
+            make_card(f"{n_losses}", "LOSSES", COLOR_NEG),
             make_card(f"{n_be}", "BE", COLOR_NEUTRAL),
-            make_card(f"{win_rate:.1f}%", "WIN RATE"), 
+            make_card(f"{win_rate:.1f}%", "WIN RATE"),
             make_card(f"{loss_rate:.1f}%", "LOSS RATE"),
-            # --- NOMBRES ACTUALIZADOS AQUI ---
-            make_card(f"{ratio_money:.2f}", "RISK REWARD ($) AVG HISTORICO"), 
-            make_card(f"{ratio_r:.2f}", "RISK REWARD (RR) AVG HISTORICO"),
+            make_card(f"{ratio_money:.2f}x", "RISK REWARD ($) AVG HISTORICO"),
+            make_card(f"{ratio_r:.2f}x", "RISK REWARD (RR) AVG HISTORICO"),
             make_card(f"{exp_abs:.2f}", "E(x)"),
-            make_card(f"{cur_sym(user_config)}{exp_money:.2f}", f"E(x)({cur_sym(user_config)})"),
+            make_card(a_fmt_money2(exp_money), f"E(x)({a_s})"),
             make_card(f"{exp_r:.2f}R", "E(x)(RR)"),
-            # ---------------------------------
             make_card(f"{max_dd:.2f}%", "MAX DD", COLOR_NEG),
             make_card(f"{current_dd:.2f}%", "DD ACT", COLOR_NEG if current_dd < 0 else COLOR_POS)
         ], className="flex-nowrap g-3", style={"padding": "10px 5px"}), style=SCROLL_CONTAINER_STYLE)
@@ -1411,14 +1421,18 @@ def save_balance_change(bal, session):
 def build_open_grid_cols(conf, mode="$"):
     """Columnas del grid de posiciones activas. mode '$' muestra PnL/Riesgo en
     valor absoluto; mode '%' los muestra en porcentaje sobre el costo de la posición."""
+    sym = cur_sym(conf)
+    money_fmt = f"params.value < 0 ? '-{sym}' + Math.abs(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}}) : '{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
+    pct_fmt = "Number(params.value).toFixed(2) + '%'"
     dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k not in RESERVED_CONFIG_KEYS] if isinstance(conf, dict) else []
     if mode == "%":
-        pnl_col = {"field": "unrealized_pnl_pct", "headerName": "PnL (%)", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
-        risk_col = {"field": "open_risk_pct", "headerName": "Riesgo (%)", "width": 90, "cellStyle": {'color': COLOR_NEG}}
+        pnl_col = {"field": "unrealized_pnl_pct", "headerName": "PnL (%)", "width": 100, "valueFormatter": {"function": pct_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
+        risk_col = {"field": "open_risk_pct", "headerName": "Riesgo (%)", "width": 100, "valueFormatter": {"function": pct_fmt}, "cellStyle": {'color': COLOR_NEG}}
     else:
-        pnl_col = {"field": "unrealized_pnl", "headerName": f"PnL ({cur_sym(conf)})", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
-        risk_col = {"field": "open_risk", "headerName": "Riesgo", "width": 90, "cellStyle": {'color': COLOR_NEG}}
-    return [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 70}] + dyn_cols + [{"field": "entry_price", "headerName": "In", "width": 90}, {"field": "current_price", "headerName": "Live", "width": 90, "cellStyle": {'fontWeight': 'bold'}}, pnl_col, risk_col, {"field": "current_stop_loss", "headerName": "SL Act", "width": 90, "editable": True, "cellStyle": {'color': TEXT_MAIN, 'fontWeight': 'bold', 'backgroundColor': '#2B3139'}}]
+        pnl_col = {"field": "unrealized_pnl", "headerName": f"PnL ({sym})", "width": 100, "valueFormatter": {"function": money_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}
+        risk_col = {"field": "open_risk", "headerName": f"Riesgo ({sym})", "width": 100, "valueFormatter": {"function": money_fmt}, "cellStyle": {'color': COLOR_NEG}}
+    price_fmt = f"'{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
+    return [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 70}] + dyn_cols + [{"field": "entry_price", "headerName": "In", "width": 100, "valueFormatter": {"function": price_fmt}}, {"field": "current_price", "headerName": "Live", "width": 100, "valueFormatter": {"function": price_fmt}, "cellStyle": {'fontWeight': 'bold'}}, pnl_col, risk_col, {"field": "current_stop_loss", "headerName": "SL Act", "width": 100, "valueFormatter": {"function": price_fmt}, "editable": True, "cellStyle": {'color': TEXT_MAIN, 'fontWeight': 'bold', 'backgroundColor': '#2B3139'}}]
 
 def render_tab(tab, session):
     """Construye el contenido de una pestaña (función pura, sin callback)."""
@@ -1494,8 +1508,13 @@ def render_tab(tab, session):
         else:
             df['visual_id'] = []
             
+        sym = cur_sym(conf)
+        h_money_fmt = f"params.value < 0 ? '-{sym}' + Math.abs(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}}) : '{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
+        h_price_fmt = f"'{sym}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"
+        h_pct_fmt = "Number(params.value).toFixed(2) + '%'"
+        h_r_fmt = "Number(params.value).toFixed(2) + 'R'"
         dyn_cols = [{"field": k, "headerName": k, "width": 100} for k in conf.keys() if k not in RESERVED_CONFIG_KEYS] if isinstance(conf, dict) else []
-        cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "visual_id", "headerName": "#", "width": 60, "sortable": True}, {"field": "entry_date", "width": 100}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 80}, {"field": "result_type", "width": 70}, {"field": "entry_price", "width": 90}, {"field": "exit_price", "width": 90}, {"field": "initial_stop_loss", "width": 80}, {"field": "current_stop_loss", "width": 80}] + dyn_cols + [{"field": "rr", "headerName": "R", "width": 80}, {"field": "pnl", "headerName": "PnL", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, {"field": "pnl_pct", "headerName": "PnL %", "width": 90, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}},
+        cols = [{"field": "id", "checkboxSelection": True, "width": 50}, {"field": "visual_id", "headerName": "#", "width": 60, "sortable": True}, {"field": "entry_date", "width": 100}, {"field": "symbol", "width": 90}, {"field": "side", "width": 80, "cellStyle": {"styleConditions": [{"condition": "params.value=='LONG'", "style": {"color": COLOR_POS}}, {"condition": "params.value=='SHORT'", "style": {"color": COLOR_NEG}}]}}, {"field": "quantity", "headerName": "Qty", "width": 80}, {"field": "result_type", "width": 70}, {"field": "entry_price", "width": 100, "valueFormatter": {"function": h_price_fmt}}, {"field": "exit_price", "width": 100, "valueFormatter": {"function": h_price_fmt}}, {"field": "initial_stop_loss", "width": 90, "valueFormatter": {"function": h_price_fmt}}, {"field": "current_stop_loss", "width": 90, "valueFormatter": {"function": h_price_fmt}}] + dyn_cols + [{"field": "rr", "headerName": "R", "width": 80, "valueFormatter": {"function": h_r_fmt}}, {"field": "pnl", "headerName": f"PnL ({sym})", "width": 100, "valueFormatter": {"function": h_money_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}}, {"field": "pnl_pct", "headerName": "PnL %", "width": 90, "valueFormatter": {"function": h_pct_fmt}, "cellStyle": {"styleConditions": [{"condition": "params.value >= 0", "style": {"color": COLOR_POS}}, {"condition": "params.value < 0", "style": {"color": COLOR_NEG}}]}},
                 # --- NOTAS ---
                 {"field": "entry_notes", "headerName": "Notas Entrada", "width": 200, "editable": True, "cellEditor": "agLargeTextCellEditor"},
                 {"field": "exit_notes", "headerName": "Notas Salida", "width": 200, "editable": True, "cellEditor": "agLargeTextCellEditor"},
@@ -1697,7 +1716,7 @@ def render_tab(tab, session):
                     dbc.CardBody([
                         dbc.Row([
                             dbc.Col(dbc.Input(id="cm-date", type="date", value=date.today(), style=INPUT_STYLE), width=3),
-                            dbc.Col(dbc.Input(id="cm-amount", placeholder="Monto ($)", type="number", min=0, style=INPUT_STYLE), width=3),
+                            dbc.Col(dbc.Input(id="cm-amount", placeholder=f"Monto ({cur_sym(conf)})", type="number", min=0, style=INPUT_STYLE), width=3),
                             dbc.Col(dbc.Select(id="cm-type", options=[{"label": "APORTE", "value": "APORTE"}, {"label": "RETIRO", "value": "RETIRO"}], value="APORTE", style=INPUT_STYLE), width=3),
                             dbc.Col(dbc.Button("AGREGAR", id="btn-add-cm", color="light", className="w-100 fw-bold text-dark", style={"fontFamily": "'Chakra Petch', 'Inter', sans-serif", "border": "none"}), width=3)
                         ], className="mb-3"),
@@ -1706,7 +1725,7 @@ def render_tab(tab, session):
                             columnDefs=[
                                 {"field": "id", "checkboxSelection": True, "width": 70},
                                 {"field": "movement_date", "headerName": "Fecha", "width": 130},
-                                {"field": "amount", "headerName": "Monto ($)", "width": 130},
+                                {"field": "amount", "headerName": f"Monto ({cur_sym(conf)})", "width": 140, "valueFormatter": {"function": f"'{cur_sym(conf)}' + Number(params.value).toLocaleString(undefined, {{minimumFractionDigits:2, maximumFractionDigits:2}})"}},
                                 {"field": "movement_type", "headerName": "Tipo", "flex": 1, "cellStyle": {"styleConditions": [
                                     {"condition": "params.value=='APORTE'", "style": {"color": COLOR_POS}},
                                     {"condition": "params.value=='RETIRO'", "style": {"color": COLOR_NEG}}
@@ -2047,8 +2066,8 @@ def toggle_pnl_mode(mode, session):
     return build_open_grid_cols(conf, mode or "$")
 
 # --- CALLBACK GRAFICO RIESGO LIVE ---
-@app.callback(Output("fig-live-risk", "figure"), [Input("live-chart-mode-selector", "value"), Input("open-grid", "rowData")], [State("session-store", "data")])
-def update_live_risk_chart(mode, rows, session):
+@app.callback(Output("fig-live-risk", "figure"), [Input("live-chart-mode-selector", "value"), Input("open-grid", "rowData"), Input("pnl-mode-toggle", "value")], [State("session-store", "data")])
+def update_live_risk_chart(mode, rows, pnl_mode, session):
     if not session or not rows:
         fig = go.Figure()
         fig.update_layout(paper_bgcolor=CARD_BG, plot_bgcolor=CARD_BG, font_color=COLOR_NEUTRAL, font_family="'Chakra Petch', 'Inter', sans-serif", xaxis=dict(visible=False), yaxis=dict(visible=False))
@@ -2057,31 +2076,36 @@ def update_live_risk_chart(mode, rows, session):
     df = pd.DataFrame(rows)
     if df.empty: return go.Figure()
 
-    if 'unrealized_pnl' not in df.columns: df['unrealized_pnl'] = 0.0
-    if 'open_risk' not in df.columns: df['open_risk'] = 0.0
+    is_pct = (pnl_mode == "%")
+    pnl_field = 'unrealized_pnl_pct' if is_pct else 'unrealized_pnl'
+    risk_field = 'open_risk_pct' if is_pct else 'open_risk'
 
-    for col in ['unrealized_pnl', 'open_risk']:
+    for col in [pnl_field, risk_field]:
+        if col not in df.columns: df[col] = 0.0
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
     sym = cur_sym(session.get('config', {}))
+    unit = "%" if is_pct else sym
 
-    def fmt_money(v):
+    def fmt_val(v):
+        if is_pct:
+            return f"{v:+.2f}%"
         return f"-{sym}{abs(v):,.0f}" if v < 0 else f"{sym}{v:,.0f}"
 
-    # Look "sombreado": relleno semitransparente + borde sólido del mismo color
     POS_FILL, POS_LINE = "rgba(0, 176, 189, 0.4)", COLOR_POS
     NEG_FILL, NEG_LINE = "rgba(246, 70, 93, 0.4)", COLOR_NEG
-    RISK_FILL = "rgba(246, 70, 93, 0.15)"  # riesgo más tenue para no confundir con PnL negativo
+    RISK_FILL = "rgba(246, 70, 93, 0.15)"
     LABEL_FONT = dict(color=TEXT_MAIN, size=11, family="'Chakra Petch', 'Inter', sans-serif")
 
     fig = go.Figure()
     show_legend = False
 
     if mode == 'TOTAL':
-        total_pnl = df['unrealized_pnl'].sum()
-        total_risk = df['open_risk'].sum()
+        total_pnl = df[pnl_field].sum()
+        total_risk = df[risk_field].sum()
 
         x_cats = ['PNL NO REALIZADO', 'RIESGO ACTUAL']
+        hover_fmt = '%{x}<br>%{y:,.2f}%<extra></extra>' if is_pct else '%{x}<br>' + sym + '%{y:,.2f}<extra></extra>'
         fig.add_trace(go.Bar(
             x=x_cats,
             y=[total_pnl, total_risk],
@@ -2090,48 +2114,50 @@ def update_live_risk_chart(mode, rows, session):
                 line=dict(color=[POS_LINE if total_pnl >= 0 else NEG_LINE, NEG_LINE], width=1.5),
                 cornerradius=6
             ),
-            text=[fmt_money(total_pnl), fmt_money(total_risk)],
+            text=[fmt_val(total_pnl), fmt_val(total_risk)],
             textposition='outside', textfont=LABEL_FONT, cliponaxis=False,
-            hovertemplate='%{x}<br>' + sym + '%{y:,.2f}<extra></extra>'
+            hovertemplate=hover_fmt
         ))
         fig.update_layout(bargap=0.45)
 
     else:
-        df_grouped = df.groupby('symbol')[['unrealized_pnl', 'open_risk']].sum().reset_index()
+        df_grouped = df.groupby('symbol')[[pnl_field, risk_field]].sum().reset_index()
         x_cats = sorted(df_grouped['symbol'].tolist())
         show_legend = True
 
-        pnl_fill = np.where(df_grouped['unrealized_pnl'] >= 0, POS_FILL, NEG_FILL)
-        pnl_line = np.where(df_grouped['unrealized_pnl'] >= 0, POS_LINE, NEG_LINE)
+        pnl_fill = np.where(df_grouped[pnl_field] >= 0, POS_FILL, NEG_FILL)
+        pnl_line = np.where(df_grouped[pnl_field] >= 0, POS_LINE, NEG_LINE)
+        hover_pnl = '%{x} · PnL: %{y:,.2f}%<extra></extra>' if is_pct else '%{x} · PnL: ' + sym + '%{y:,.2f}<extra></extra>'
+        hover_risk = '%{x} · Riesgo: %{y:,.2f}%<extra></extra>' if is_pct else '%{x} · Riesgo: ' + sym + '%{y:,.2f}<extra></extra>'
         fig.add_trace(go.Bar(
             name='PnL No Realizado',
             x=df_grouped['symbol'],
-            y=df_grouped['unrealized_pnl'],
+            y=df_grouped[pnl_field],
             marker=dict(color=pnl_fill, line=dict(color=pnl_line, width=1.5), cornerradius=4),
-            text=df_grouped['unrealized_pnl'].apply(fmt_money),
+            text=df_grouped[pnl_field].apply(fmt_val),
             textposition='outside', textfont=LABEL_FONT, cliponaxis=False,
-            hovertemplate='%{x} · PnL: ' + sym + '%{y:,.2f}<extra></extra>'
+            hovertemplate=hover_pnl
         ))
 
         fig.add_trace(go.Bar(
             name='Riesgo Actual',
             x=df_grouped['symbol'],
-            y=df_grouped['open_risk'],
+            y=df_grouped[risk_field],
             marker=dict(color=RISK_FILL, line=dict(color=NEG_LINE, width=1.5), cornerradius=4),
-            text=df_grouped['open_risk'].apply(fmt_money),
+            text=df_grouped[risk_field].apply(fmt_val),
             textposition='outside', textfont=LABEL_FONT, cliponaxis=False,
-            hovertemplate='%{x} · Riesgo: ' + sym + '%{y:,.2f}<extra></extra>'
+            hovertemplate=hover_risk
         ))
         fig.update_layout(barmode='group', bargap=0.3, bargroupgap=0.15)
 
+    tick_opts = dict(ticksuffix='%', tickformat=",.2f") if is_pct else dict(tickprefix=sym, tickformat=",.0f")
     fig.update_layout(
         paper_bgcolor=CARD_BG,
         plot_bgcolor=CARD_BG,
         font_color=TEXT_MAIN,
         font_family="'Chakra Petch', 'Inter', sans-serif",
         margin=dict(l=20, r=20, t=30, b=20),
-        yaxis=dict(showgrid=True, gridcolor="rgba(43, 49, 57, 0.5)", zerolinecolor=BORDER_COLOR,
-                   tickprefix=sym, tickformat=",.0f"),
+        yaxis=dict(showgrid=True, gridcolor="rgba(43, 49, 57, 0.5)", zerolinecolor=BORDER_COLOR, **tick_opts),
         xaxis=dict(showgrid=False, zerolinecolor=BORDER_COLOR, type='category', categoryarray=x_cats),
         showlegend=show_legend,
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
@@ -2669,19 +2695,24 @@ def update_performance(n_ytd, n_yoy, n_all, n_2025, benchmark, n_auto, active_ta
             content.append(html.P(sub_text, style={"color": COLOR_NEUTRAL, "fontSize": "0.7rem", "marginTop": "6px", "marginBottom": "0", "fontFamily": "'Chakra Petch', 'Inter', sans-serif"}))
         return dbc.Col(html.Div(content, style=KPI_CARD_STYLE), width="auto", className="mb-2 p-1")
 
+    def pfmt(v):
+        return f"-{sym}{abs(v):,.0f}" if v < 0 else f"{sym}{v:,.0f}"
+    def pfmt_sign(v):
+        return f"-{sym}{abs(v):,.0f}" if v < 0 else f"+{sym}{v:,.0f}"
+
     flow_cards = []
     if not cash_movements_df.empty:
         flow_cards = [
-            make_perf_card("APORTES (PERÍODO)", f"{sym}{total_deposits:,.0f}", "Depósitos externos", COLOR_POS),
-            make_perf_card("RETIROS (PERÍODO)", f"{sym}{total_withdrawals:,.0f}", "Extracciones", COLOR_NEG),
+            make_perf_card("APORTES (PERÍODO)", pfmt(total_deposits), "Depósitos externos", COLOR_POS),
+            make_perf_card("RETIROS (PERÍODO)", pfmt(total_withdrawals), "Extracciones", COLOR_NEG),
         ]
 
     kpis_layout = html.Div(dbc.Row([
-        make_perf_card("CAPITAL INICIAL", f"{sym}{initial_balance:,.0f}"),
-        make_perf_card("VALOR INICIAL", f"{sym}{period_start_value:,.0f}", "Inicio del período"),
+        make_perf_card("CAPITAL INICIAL", pfmt(initial_balance)),
+        make_perf_card("VALOR INICIAL", pfmt(period_start_value), "Inicio del período"),
         *flow_cards,
-        make_perf_card("GANANCIA NETA", f"{sym}{total_pnl:+,.0f}", "Excluye aportes/retiros", COLOR_POS if total_pnl >= 0 else COLOR_NEG),
-        make_perf_card("VALOR FINAL", f"{sym}{total_end:,.0f}", "Fin del período"),
+        make_perf_card("GANANCIA NETA", pfmt_sign(total_pnl), "Excluye aportes/retiros", COLOR_POS if total_pnl >= 0 else COLOR_NEG),
+        make_perf_card("VALOR FINAL", pfmt(total_end), "Fin del período"),
         make_perf_card("RETORNO TOTAL (TWR)", f"{total_return:+.2f}%", f"{bench_name}: {total_return_spy:+.2f}%", COLOR_POS if total_return >= 0 else COLOR_NEG),
         make_perf_card("MAX DRAWDOWN", f"{max_dd:.2f}%", f"{bench_name}: {max_dd_spy:.2f}%", COLOR_NEG),
         make_perf_card("SHARPE RATIO", f"{sharpe_port:.2f}", f"{bench_name}: {sharpe_spy:.2f}", TEXT_MAIN),
