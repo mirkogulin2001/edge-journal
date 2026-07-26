@@ -12,11 +12,11 @@
    ═══════════════════════════════════════════════════════════════ */
 
 /* --- FONDO GENERAL Y TIPOGRAFÍA BASE --- */
-/* Michroma en toda la app (fallback Inter), números tabulares para cifras */
+/* Chakra Petch en toda la app (fallback Inter), números tabulares para cifras */
 body {
     background-color: #0B0E11 !important;
     color: #EAECEF;
-    font-family: 'Michroma', 'Inter', sans-serif;
+    font-family: 'Chakra Petch', 'Inter', sans-serif;
     /* Cifras alineadas en columnas */
     font-variant-numeric: tabular-nums;
 }
@@ -120,16 +120,16 @@ h1, h2, h3, h4, h5 {
 .ag-header-cell-label {
     color: #848E9C;
     text-transform: uppercase;
-    font-size: 0.62rem;
+    font-size: 0.72rem;
     letter-spacing: 0.5px;
-    font-family: 'Michroma', 'Inter', sans-serif;
+    font-family: 'Chakra Petch', 'Inter', sans-serif;
 }
 
 /* Celdas de datos con números tabulares (alineación de columnas) */
 .ag-cell {
-    font-family: 'Michroma', 'Inter', sans-serif;
+    font-family: 'Chakra Petch', 'Inter', sans-serif;
     font-variant-numeric: tabular-nums;
-    font-size: 0.68rem;
+    font-size: 0.8rem;
 }
 
 /* --- DROPDOWNS DE DASH (React-Select) --- */
@@ -175,5 +175,5 @@ h1, h2, h3, h4, h5 {
 
 /* --- TOOLTIPS DE PLOTLY: tipografía consistente --- */
 .hoverlayer .hovertext text {
-    font-family: 'Michroma', 'Inter', sans-serif !important;
+    font-family: 'Chakra Petch', 'Inter', sans-serif !important;
 }
