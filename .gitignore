@@ -1,3 +1,10 @@
 __pycache__/
 *.pyc
 .env
+.env.local
+
+# Next.js
+.next/
+out/
+node_modules/
+npm-debug.log*

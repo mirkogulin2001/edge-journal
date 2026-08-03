@@ -1,0 +1,79 @@
+@import url("https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #0b0e11;
+  color: #eaecef;
+  font-family: "Chakra Petch", "Inter", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background-color: rgba(0, 176, 189, 0.35);
+  color: #eaecef;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0e11;
+}
+::-webkit-scrollbar-thumb {
+  background: #2b3139;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #00b0bd;
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2b3139 #0b0e11;
+}
+
+/* AG Grid dark overrides */
+.ag-theme-alpine-dark {
+  --ag-background-color: #181a20;
+  --ag-header-background-color: #0b0e11;
+  --ag-odd-row-background-color: #1e222b;
+  --ag-foreground-color: #eaecef;
+  --ag-border-color: #2b3139;
+  --ag-row-hover-color: rgba(0, 176, 189, 0.08);
+  --ag-header-foreground-color: #eaecef;
+  --ag-data-color: #eaecef;
+  --ag-row-border-color: #2b3139;
+  --ag-selected-row-background-color: #2b3139;
+  --ag-font-family: "Chakra Petch", "Inter", sans-serif;
+  --ag-font-size: 13px;
+  --ag-range-selection-border-color: transparent;
+}
+
+.ag-header-cell-label {
+  color: #848e9c;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  letter-spacing: 0.5px;
+  font-family: "Chakra Petch", "Inter", sans-serif;
+}
+
+.ag-cell {
+  font-family: "Chakra Petch", "Inter", sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+}
+
+/* Transitions for tab content */
+.tab-content-enter {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.tab-content-active {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
