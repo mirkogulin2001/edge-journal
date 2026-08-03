@@ -8,19 +8,20 @@ import {
   type ReactNode,
 } from "react";
 import type { SessionData, UserConfig } from "@/types/user";
+import { updateUserConfig } from "@/lib/db/users";
 
 interface SessionCtx {
   session: SessionData | null;
   login: (session: SessionData) => void;
   logout: () => void;
-  updateConfig: (config: UserConfig) => void;
+  updateConfig: (config: UserConfig) => Promise<void>;
 }
 
 const Ctx = createContext<SessionCtx>({
   session: null,
   login: () => {},
   logout: () => {},
-  updateConfig: () => {},
+  updateConfig: async () => {},
 });
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -41,15 +42,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateConfig = useCallback(
-    (config: UserConfig) => {
+    async (config: UserConfig) => {
       setSession((prev) => {
         if (!prev) return prev;
         const next = { ...prev, config };
         localStorage.setItem("ej-session", JSON.stringify(next));
         return next;
       });
+      if (session?.user) {
+        await updateUserConfig(session.user, config);
+      }
     },
-    []
+    [session?.user]
   );
 
   return (
