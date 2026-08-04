@@ -16,6 +16,88 @@ interface DailyRow {
 const _cache: Record<string, { data: DailyRow[]; ts: number }> = {};
 const CACHE_TTL = 300_000;
 
+async function fetchHistoricalFallback(
+  ticker: string,
+  startDate: Date,
+  endDate: Date
+): Promise<Record<string, number>> {
+  const period1 = Math.floor(startDate.getTime() / 1000);
+  const period2 = Math.floor(endDate.getTime() / 1000);
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?interval=1d&period1=${period1}&period2=${period2}`;
+
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+    if (!res.ok) {
+      console.error(`[performance] HTTP fallback ${res.status} for ${ticker}`);
+      return {};
+    }
+    const json = await res.json();
+    const result = json?.chart?.result?.[0];
+    if (!result) return {};
+
+    const timestamps: number[] = result.timestamp || [];
+    const closes: number[] =
+      result.indicators?.quote?.[0]?.close || [];
+    const adjCloses: number[] =
+      result.indicators?.adjclose?.[0]?.adjclose || closes;
+
+    const prices: Record<string, number> = {};
+    for (let i = 0; i < timestamps.length; i++) {
+      const d = new Date(timestamps[i] * 1000).toISOString().split("T")[0];
+      const p = adjCloses[i] ?? closes[i];
+      if (typeof p === "number" && p > 0 && isFinite(p)) {
+        prices[d] = p;
+      }
+    }
+    return prices;
+  } catch (err) {
+    console.error(
+      `[performance] HTTP fallback error for ${ticker}:`,
+      err instanceof Error ? err.message : err
+    );
+    return {};
+  }
+}
+
+async function fetchHistorical(
+  ticker: string,
+  startDate: Date,
+  endDate: Date
+): Promise<Record<string, number>> {
+  // Try yahoo-finance2 library first
+  try {
+    const yahooFinance = (await import("yahoo-finance2")).default;
+    const result = await yahooFinance.historical(ticker, {
+      period1: startDate.toISOString().split("T")[0],
+      period2: endDate.toISOString().split("T")[0],
+    });
+    const prices: Record<string, number> = {};
+    for (const row of result) {
+      const d = new Date(row.date).toISOString().split("T")[0];
+      const p = (row as Record<string, unknown>).adjClose as number
+        ?? row.close;
+      if (typeof p === "number" && p > 0) {
+        prices[d] = p;
+      }
+    }
+    if (Object.keys(prices).length > 0) {
+      console.log(`[performance] yahoo-finance2: ${Object.keys(prices).length} rows for ${ticker}`);
+      return prices;
+    }
+  } catch (e) {
+    console.error(
+      `[performance] yahoo-finance2 failed for ${ticker}:`,
+      e instanceof Error ? e.message : e
+    );
+  }
+
+  // Fallback to HTTP
+  console.log(`[performance] Trying HTTP fallback for ${ticker}`);
+  const prices = await fetchHistoricalFallback(ticker, startDate, endDate);
+  console.log(`[performance] HTTP fallback: ${Object.keys(prices).length} rows for ${ticker}`);
+  return prices;
+}
+
 export async function GET(req: NextRequest) {
   const user = req.nextUrl.searchParams.get("user");
   const balStr = req.nextUrl.searchParams.get("balance") || "10000";
@@ -74,75 +156,24 @@ export async function GET(req: NextRequest) {
       if (maxCm > endDate) endDate = maxCm;
     }
 
-    // Download historical prices
-    const priceMap: Record<string, Record<string, number>> = {};
     const endDatePlus = new Date(endDate);
     endDatePlus.setDate(endDatePlus.getDate() + 3);
 
-    let yahooFinance: typeof import("yahoo-finance2").default | null = null;
-    try {
-      yahooFinance = (await import("yahoo-finance2")).default;
-    } catch (importErr) {
-      console.error(
-        "[performance] yahoo-finance2 import failed:",
-        importErr instanceof Error ? importErr.message : importErr
-      );
+    // Download historical prices for all tickers + benchmark in parallel
+    const priceMap: Record<string, Record<string, number>> = {};
+    const allSymbols = [...tickers, benchmark];
+    const priceResults = await Promise.all(
+      allSymbols.map((sym) => fetchHistorical(sym, startDate, endDatePlus))
+    );
+
+    for (let i = 0; i < allSymbols.length; i++) {
+      priceMap[allSymbols[i]] = priceResults[i];
     }
 
-    if (yahooFinance) {
-      for (const ticker of tickers) {
-        try {
-          const result = await yahooFinance.historical(ticker, {
-            period1: startDate.toISOString().split("T")[0],
-            period2: endDatePlus.toISOString().split("T")[0],
-          });
-          priceMap[ticker] = {};
-          for (const row of result) {
-            const d = new Date(row.date).toISOString().split("T")[0];
-            priceMap[ticker][d] = row.close;
-          }
-          console.log(
-            `[performance] Fetched ${Object.keys(priceMap[ticker]).length} price rows for ${ticker}`
-          );
-        } catch (e) {
-          console.error(
-            `[performance] Failed to fetch historical for ${ticker}:`,
-            e instanceof Error ? e.message : e
-          );
-        }
-      }
-    } else {
-      console.warn(
-        "[performance] yahoo-finance2 unavailable, skipping historical price fetch for tickers"
-      );
-    }
-
-    // Download benchmark
-    const benchPrices: Record<string, number> = {};
-    if (yahooFinance) {
-      try {
-        const benchResult = await yahooFinance.historical(benchmark, {
-          period1: startDate.toISOString().split("T")[0],
-          period2: endDatePlus.toISOString().split("T")[0],
-        });
-        for (const row of benchResult) {
-          const d = new Date(row.date).toISOString().split("T")[0];
-          benchPrices[d] = row.close;
-        }
-        console.log(
-          `[performance] Fetched ${Object.keys(benchPrices).length} benchmark rows for ${benchmark}`
-        );
-      } catch (e) {
-        console.error(
-          `[performance] Failed to fetch benchmark ${benchmark}:`,
-          e instanceof Error ? e.message : e
-        );
-      }
-    } else {
-      console.warn(
-        "[performance] yahoo-finance2 unavailable, skipping benchmark fetch"
-      );
-    }
+    const benchPrices = priceMap[benchmark] || {};
+    console.log(
+      `[performance] Final counts — tickers: ${tickers.map((t) => `${t}:${Object.keys(priceMap[t] || {}).length}`).join(", ")}, benchmark ${benchmark}: ${Object.keys(benchPrices).length}`
+    );
 
     // Generate business day range
     const allDates: string[] = [];
