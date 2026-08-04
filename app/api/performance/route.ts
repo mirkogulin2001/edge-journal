@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
-import yahooFinance from "yahoo-finance2";
 
 interface DailyRow {
   date: string;
@@ -80,35 +79,69 @@ export async function GET(req: NextRequest) {
     const endDatePlus = new Date(endDate);
     endDatePlus.setDate(endDatePlus.getDate() + 3);
 
-    for (const ticker of tickers) {
-      try {
-        const result = await yahooFinance.historical(ticker, {
-          period1: startDate.toISOString().split("T")[0],
-          period2: endDatePlus.toISOString().split("T")[0],
-        });
-        priceMap[ticker] = {};
-        for (const row of result) {
-          const d = new Date(row.date).toISOString().split("T")[0];
-          priceMap[ticker][d] = row.close;
+    let yahooFinance: typeof import("yahoo-finance2").default | null = null;
+    try {
+      yahooFinance = (await import("yahoo-finance2")).default;
+    } catch (importErr) {
+      console.error(
+        "[performance] yahoo-finance2 import failed:",
+        importErr instanceof Error ? importErr.message : importErr
+      );
+    }
+
+    if (yahooFinance) {
+      for (const ticker of tickers) {
+        try {
+          const result = await yahooFinance.historical(ticker, {
+            period1: startDate.toISOString().split("T")[0],
+            period2: endDatePlus.toISOString().split("T")[0],
+          });
+          priceMap[ticker] = {};
+          for (const row of result) {
+            const d = new Date(row.date).toISOString().split("T")[0];
+            priceMap[ticker][d] = row.close;
+          }
+          console.log(
+            `[performance] Fetched ${Object.keys(priceMap[ticker]).length} price rows for ${ticker}`
+          );
+        } catch (e) {
+          console.error(
+            `[performance] Failed to fetch historical for ${ticker}:`,
+            e instanceof Error ? e.message : e
+          );
         }
-      } catch (e) {
-        console.error(`Failed to fetch ${ticker}:`, e);
       }
+    } else {
+      console.warn(
+        "[performance] yahoo-finance2 unavailable, skipping historical price fetch for tickers"
+      );
     }
 
     // Download benchmark
     const benchPrices: Record<string, number> = {};
-    try {
-      const benchResult = await yahooFinance.historical(benchmark, {
-        period1: startDate.toISOString().split("T")[0],
-        period2: endDatePlus.toISOString().split("T")[0],
-      });
-      for (const row of benchResult) {
-        const d = new Date(row.date).toISOString().split("T")[0];
-        benchPrices[d] = row.close;
+    if (yahooFinance) {
+      try {
+        const benchResult = await yahooFinance.historical(benchmark, {
+          period1: startDate.toISOString().split("T")[0],
+          period2: endDatePlus.toISOString().split("T")[0],
+        });
+        for (const row of benchResult) {
+          const d = new Date(row.date).toISOString().split("T")[0];
+          benchPrices[d] = row.close;
+        }
+        console.log(
+          `[performance] Fetched ${Object.keys(benchPrices).length} benchmark rows for ${benchmark}`
+        );
+      } catch (e) {
+        console.error(
+          `[performance] Failed to fetch benchmark ${benchmark}:`,
+          e instanceof Error ? e.message : e
+        );
       }
-    } catch (e) {
-      console.error(`Failed to fetch benchmark ${benchmark}:`, e);
+    } else {
+      console.warn(
+        "[performance] yahoo-finance2 unavailable, skipping benchmark fetch"
+      );
     }
 
     // Generate business day range
