@@ -404,9 +404,13 @@ export default function OperativaPage() {
                     className={INPUT}
                   >
                     <option value="">{k}</option>
-                    {(config[k] as string | undefined)
-                      ?.split(",")
-                      .map((v: string) => v.trim())
+                    {(typeof config[k] === "string"
+                      ? config[k].split(",")
+                      : Array.isArray(config[k])
+                        ? (config[k] as string[])
+                        : []
+                    )
+                      .map((v: string) => String(v).trim())
                       .filter(Boolean)
                       .map((v: string) => (
                         <option key={v} value={v}>
