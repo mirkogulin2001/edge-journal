@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { SessionProvider } from "@/hooks/useSession";
+import { EnvScript } from "@/components/EnvScript";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -8,22 +8,19 @@ export const metadata: Metadata = {
   description: "Trading journal for serious traders",
 };
 
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  headers();
-
-  const envScript = `window.__ENV=${JSON.stringify({
-    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "",
-    NEXT_PUBLIC_SUPABASE_KEY: process.env.NEXT_PUBLIC_SUPABASE_KEY || process.env.SUPABASE_KEY || "",
-  })};`;
-
   return (
     <html lang="es">
+      <head>
+        <EnvScript />
+      </head>
       <body className="min-h-screen bg-bg text-text-main font-display antialiased">
-        <script dangerouslySetInnerHTML={{ __html: envScript }} />
         <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
