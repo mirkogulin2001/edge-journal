@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { SessionProvider } from "@/hooks/useSession";
 import "./globals.css";
 
@@ -12,6 +13,8 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  headers();
+
   const envScript = `window.__ENV=${JSON.stringify({
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || "",
     NEXT_PUBLIC_SUPABASE_KEY: process.env.NEXT_PUBLIC_SUPABASE_KEY || process.env.SUPABASE_KEY || "",
