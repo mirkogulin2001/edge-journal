@@ -5,6 +5,7 @@ import { useSession } from "@/hooks/useSession";
 import {
   openNewTrade,
   getOpenTrades,
+  getClosedTrades,
   closeTradeTotal,
   closePartial,
   updateStopLoss,
@@ -72,6 +73,15 @@ export default function OperativaPage() {
     },
     { refreshInterval: 30000 }
   );
+
+  const { data: closedTrades = [] } = useSWR(
+    user ? `trades-closed-${user}` : null,
+    () => getClosedTrades(user!)
+  );
+
+  const initialBalance = (config.initial_balance as number) || 10000;
+  const realizedPnl = closedTrades.reduce((s, t) => s + (t.pnl ?? 0), 0);
+  const accountBalance = initialBalance + realizedPnl;
 
   const tradesWithMetrics = calculateMetrics(openTrades, livePrices);
   const [pnlMode, setPnlMode] = useState<"$" | "%">("$");
@@ -204,8 +214,8 @@ export default function OperativaPage() {
 
   const totalPnl = tradesWithMetrics.reduce((s, t) => s + t.unrealized_pnl, 0);
   const totalRisk = tradesWithMetrics.reduce((s, t) => s + t.open_risk, 0);
-  const totalPnlPct = tradesWithMetrics.reduce((s, t) => s + t.unrealized_pnl_pct, 0);
-  const totalRiskPct = tradesWithMetrics.reduce((s, t) => s + t.open_risk_pct, 0);
+  const totalPnlPctAcct = accountBalance > 0 ? (totalPnl / accountBalance) * 100 : 0;
+  const totalRiskPctAcct = accountBalance > 0 ? (totalRisk / accountBalance) * 100 : 0;
 
   // Build exposure chart data
   function buildExposureChart() {
@@ -749,12 +759,12 @@ export default function OperativaPage() {
         {tradesWithMetrics.length > 0 && (
           <div className="flex gap-3 overflow-x-auto pb-2">
             <KpiCard
-              value={isPct ? fmtVal(totalPnlPct, true, sym) : fmtMoney2(totalPnl, sym)}
+              value={isPct ? fmtVal(totalPnlPctAcct, true, sym) : fmtMoney2(totalPnl, sym)}
               label="PNL NO REALIZADO"
               color={totalPnl >= 0 ? "#00B0BD" : "#F6465D"}
             />
             <KpiCard
-              value={isPct ? fmtVal(totalRiskPct, true, sym) : fmtMoney2(totalRisk, sym)}
+              value={isPct ? fmtVal(totalRiskPctAcct, true, sym) : fmtMoney2(totalRisk, sym)}
               label="RIESGO ACTUAL"
               color="#F6465D"
             />
