@@ -397,8 +397,8 @@ export default function AnalyticsPage() {
           label="DD ACT"
           color={a.currentDd < 0 ? "#F6465D" : "#00B0BD"}
         />
-        <KpiCard value={`${a.maxWinStreak}`} label="RACHA WIN" color="#00B0BD" />
-        <KpiCard value={`${a.maxLossStreak}`} label="RACHA LOSS" color="#F6465D" />
+        <KpiCard value={`${a.maxWinStreak}`} label="MAX RACHA GANADORA" color="#00B0BD" />
+        <KpiCard value={`${a.maxLossStreak}`} label="MAX RACHA PERDEDORA" color="#F6465D" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">

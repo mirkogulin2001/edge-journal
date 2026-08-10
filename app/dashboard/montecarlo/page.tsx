@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useSession } from "@/hooks/useSession";
 import { getClosedTrades } from "@/lib/db/trades";
 import { fmtPct } from "@/lib/calculations/helpers";
@@ -185,14 +185,32 @@ export default function MonteCarloPage() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<MCResult | null>(null);
 
+  const [visibleCharts, setVisibleCharts] = useState(0);
+  const runIdRef = useRef(0);
+
   function handleRun() {
     setRunning(true);
+    setVisibleCharts(0);
+    runIdRef.current++;
     setTimeout(() => {
       const r = runMonteCarlo(closedTrades, nSims, kellyFrac, tradesPerSim);
       setResult(r);
       setRunning(false);
     }, 50);
   }
+
+  useEffect(() => {
+    if (!result || running) return;
+    const id = ++runIdRef.current;
+    setVisibleCharts(0);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    for (let i = 1; i <= 4; i++) {
+      timers.push(setTimeout(() => {
+        if (runIdRef.current === id) setVisibleCharts(i);
+      }, i * 350));
+    }
+    return () => timers.forEach(clearTimeout);
+  }, [result, running]);
 
   const mc = result;
   const nShown = mc ? Math.min(50, mc.simCurves.length) : 0;
@@ -313,162 +331,178 @@ export default function MonteCarloPage() {
           {/* Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Returns distribution */}
-            <PlotlyChart
-              data={[
-                {
-                  type: "histogram",
-                  x: mc.finalRet,
-                  nbinsx: calcBins(mc.finalRet),
-                  marker: {
-                    color: "#00B0BD",
-                    line: { color: "#181A20", width: 1 },
+            <div className={`transition-all duration-700 ${visibleCharts >= 1 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
+              <PlotlyChart
+                data={[
+                  {
+                    type: "histogram",
+                    x: mc.finalRet,
+                    nbinsx: calcBins(mc.finalRet),
+                    marker: {
+                      color: "#00B0BD",
+                      line: { color: "#181A20", width: 1 },
+                    },
+                    showlegend: false,
                   },
-                  showlegend: false,
-                },
-                {
-                  type: "scatter",
-                  mode: "lines",
-                  x: [mc.meanRet, mc.meanRet],
-                  y: [0, nSims * 0.15],
-                  name: `Media: ${mc.meanRet.toFixed(1)}%`,
-                  line: { color: "#F6465D", dash: "dash", width: 2 },
-                },
-                {
-                  type: "scatter",
-                  mode: "lines",
-                  x: [mc.medRet, mc.medRet],
-                  y: [0, nSims * 0.15],
-                  name: `Mediana: ${mc.medRet.toFixed(1)}%`,
-                  line: { color: "orange", dash: "dot", width: 2 },
-                },
-              ]}
-              layout={{
-                title: { text: "DISTRIBUCION RETORNOS" },
-                xaxis: { ticksuffix: "%" },
-              }}
-            />
+                  {
+                    type: "scatter",
+                    mode: "lines",
+                    x: [mc.meanRet, mc.meanRet],
+                    y: [0, nSims * 0.15],
+                    name: `Media: ${mc.meanRet.toFixed(1)}%`,
+                    line: { color: "#F6465D", dash: "dash", width: 2 },
+                  },
+                  {
+                    type: "scatter",
+                    mode: "lines",
+                    x: [mc.medRet, mc.medRet],
+                    y: [0, nSims * 0.15],
+                    name: `Mediana: ${mc.medRet.toFixed(1)}%`,
+                    line: { color: "orange", dash: "dot", width: 2 },
+                  },
+                ]}
+                layout={{
+                  title: { text: "DISTRIBUCION RETORNOS" },
+                  height: 380,
+                  xaxis: { ticksuffix: "%" },
+                }}
+                style={{ height: "380px" }}
+              />
+            </div>
 
             {/* Max DD distribution */}
-            <PlotlyChart
-              data={[
-                {
-                  type: "histogram",
-                  x: mc.maxDd,
-                  nbinsx: calcBins(mc.maxDd),
-                  marker: {
-                    color: "#F6465D",
-                    line: { color: "#181A20", width: 1 },
+            <div className={`transition-all duration-700 ${visibleCharts >= 2 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
+              <PlotlyChart
+                data={[
+                  {
+                    type: "histogram",
+                    x: mc.maxDd,
+                    nbinsx: calcBins(mc.maxDd),
+                    marker: {
+                      color: "#F6465D",
+                      line: { color: "#181A20", width: 1 },
+                    },
+                    showlegend: false,
                   },
-                  showlegend: false,
-                },
-                {
-                  type: "scatter",
-                  mode: "lines",
-                  x: [mc.meanDd, mc.meanDd],
-                  y: [0, nSims * 0.15],
-                  name: `Media: ${mc.meanDd.toFixed(1)}%`,
-                  line: { color: "#00B0BD", dash: "dash", width: 2 },
-                },
-                {
-                  type: "scatter",
-                  mode: "lines",
-                  x: [mc.medDd, mc.medDd],
-                  y: [0, nSims * 0.15],
-                  name: `Mediana: ${mc.medDd.toFixed(1)}%`,
-                  line: { color: "yellow", dash: "dot", width: 2 },
-                },
-                {
-                  type: "scatter",
-                  mode: "lines",
-                  x: [mc.p05Dd, mc.p05Dd],
-                  y: [0, nSims * 0.15],
-                  name: `Peor 5%: ${mc.p05Dd.toFixed(1)}%`,
-                  line: { color: "cyan", width: 3 },
-                },
-              ]}
-              layout={{
-                title: { text: "DISTRIBUCION MAX DD" },
-                xaxis: { ticksuffix: "%" },
-              }}
-            />
+                  {
+                    type: "scatter",
+                    mode: "lines",
+                    x: [mc.meanDd, mc.meanDd],
+                    y: [0, nSims * 0.15],
+                    name: `Media: ${mc.meanDd.toFixed(1)}%`,
+                    line: { color: "#00B0BD", dash: "dash", width: 2 },
+                  },
+                  {
+                    type: "scatter",
+                    mode: "lines",
+                    x: [mc.medDd, mc.medDd],
+                    y: [0, nSims * 0.15],
+                    name: `Mediana: ${mc.medDd.toFixed(1)}%`,
+                    line: { color: "yellow", dash: "dot", width: 2 },
+                  },
+                  {
+                    type: "scatter",
+                    mode: "lines",
+                    x: [mc.p05Dd, mc.p05Dd],
+                    y: [0, nSims * 0.15],
+                    name: `Peor 5%: ${mc.p05Dd.toFixed(1)}%`,
+                    line: { color: "cyan", width: 3 },
+                  },
+                ]}
+                layout={{
+                  title: { text: "DISTRIBUCION MAX DD" },
+                  height: 380,
+                  xaxis: { ticksuffix: "%" },
+                }}
+                style={{ height: "380px" }}
+              />
+            </div>
 
             {/* Sim curves */}
-            <PlotlyChart
-              data={[
-                ...mc.simCurves.slice(0, nShown).map((curve) => ({
-                  type: "scatter" as const,
-                  mode: "lines" as const,
-                  y: curve,
-                  line: { width: 1 },
-                  opacity: 0.15,
-                  showlegend: false,
-                  hoverinfo: "skip" as const,
-                })),
-                {
-                  type: "scatter" as const,
-                  mode: "lines" as const,
-                  y: mc.medianCurve,
-                  name: "Mediana",
-                  line: { color: "#848E9C", width: 3 },
-                },
-              ]}
-              layout={{
-                title: {
-                  text: `PROYECCION (LOG) - ${nShown} de ${nSims} curvas`,
-                },
-                xaxis: { title: "Trades" },
-                yaxis: { type: "log" },
-              }}
-            />
+            <div className={`transition-all duration-700 ${visibleCharts >= 3 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
+              <PlotlyChart
+                data={[
+                  ...mc.simCurves.slice(0, nShown).map((curve) => ({
+                    type: "scatter" as const,
+                    mode: "lines" as const,
+                    y: curve,
+                    line: { width: 1 },
+                    opacity: 0.15,
+                    showlegend: false,
+                    hoverinfo: "skip" as const,
+                  })),
+                  {
+                    type: "scatter" as const,
+                    mode: "lines" as const,
+                    y: mc.medianCurve,
+                    name: "Mediana",
+                    line: { color: "#848E9C", width: 3 },
+                  },
+                ]}
+                layout={{
+                  title: {
+                    text: `PROYECCION (LOG) - ${nShown} de ${nSims} curvas`,
+                  },
+                  height: 380,
+                  xaxis: { title: "Trades" },
+                  yaxis: { type: "log" },
+                }}
+                style={{ height: "380px" }}
+              />
+            </div>
 
             {/* Kelly curve */}
-            <PlotlyChart
-              data={[
-                {
-                  type: "scatter",
-                  mode: "lines",
-                  x: mc.kellyF,
-                  y: mc.kellyG,
-                  name: "Curva G(f)",
-                  line: { color: "#90A4AE", width: 3 },
-                },
-                ...[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-                  .map((m) => {
-                    const fp = mc.kellyFull * m;
-                    if (fp >= 1 || fp <= 0) return null;
-                    const t1 = Math.pow(1 + fp * mc.B, mc.p);
-                    const t2 = Math.pow(1 - fp, 1 - mc.p);
-                    const gp = (t1 * t2 - 1) * 100;
-                    if (gp <= 0.01) return null;
-                    return {
-                      type: "scatter" as const,
-                      mode: "markers+text" as const,
-                      x: [fp],
-                      y: [gp],
-                      name: `${m}x Kelly`,
-                      marker: {
-                        color: m === 1.0 ? "red" : "#FCD535",
-                        size: m === 1.0 ? 12 : 8,
-                        symbol: m === 1.0 ? "diamond" : "circle",
-                        line: { color: "black", width: 1 },
-                      },
-                      text: [m === 1.0 ? "1.0x (Max)" : `${m}x`],
-                      textposition: "top center" as const,
-                      textfont: { size: 10, color: "#EAECEF" },
-                    };
-                  })
-                  .filter((v): v is NonNullable<typeof v> => v != null),
-              ]}
-              layout={{
-                title: { text: "CURVA DE CRECIMIENTO VS RIESGO" },
-                xaxis: { title: "Fraccion de Riesgo (f)" },
-                yaxis: {
-                  title: "Tasa crecimiento geometrico esperado (%)",
-                  ticksuffix: "%",
-                },
-                showlegend: false,
-              }}
-            />
+            <div className={`transition-all duration-700 ${visibleCharts >= 4 ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4"}`}>
+              <PlotlyChart
+                data={[
+                  {
+                    type: "scatter",
+                    mode: "lines",
+                    x: mc.kellyF,
+                    y: mc.kellyG,
+                    name: "Curva G(f)",
+                    line: { color: "#90A4AE", width: 3 },
+                  },
+                  ...[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+                    .map((m) => {
+                      const fp = mc.kellyFull * m;
+                      if (fp >= 1 || fp <= 0) return null;
+                      const t1 = Math.pow(1 + fp * mc.B, mc.p);
+                      const t2 = Math.pow(1 - fp, 1 - mc.p);
+                      const gp = (t1 * t2 - 1) * 100;
+                      if (gp <= 0.01) return null;
+                      return {
+                        type: "scatter" as const,
+                        mode: "markers+text" as const,
+                        x: [fp],
+                        y: [gp],
+                        name: `${m}x Kelly`,
+                        marker: {
+                          color: m === 1.0 ? "red" : "#FCD535",
+                          size: m === 1.0 ? 12 : 8,
+                          symbol: m === 1.0 ? "diamond" : "circle",
+                          line: { color: "black", width: 1 },
+                        },
+                        text: [m === 1.0 ? "1.0x (Max)" : `${m}x`],
+                        textposition: "top center" as const,
+                        textfont: { size: 10, color: "#EAECEF" },
+                      };
+                    })
+                    .filter((v): v is NonNullable<typeof v> => v != null),
+                ]}
+                layout={{
+                  title: { text: "CURVA DE CRECIMIENTO VS RIESGO" },
+                  height: 380,
+                  xaxis: { title: "Fraccion de Riesgo (f)" },
+                  yaxis: {
+                    title: "Tasa crecimiento geometrico esperado (%)",
+                    ticksuffix: "%",
+                  },
+                  showlegend: false,
+                }}
+                style={{ height: "380px" }}
+              />
+            </div>
           </div>
         </>
       )}
