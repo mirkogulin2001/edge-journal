@@ -33,6 +33,8 @@ interface AnalyticsData {
   expR: number;
   maxDd: number;
   currentDd: number;
+  maxWinStreak: number;
+  maxLossStreak: number;
   tradeNums: number[];
   eqCurve: number[];
   ddCurve: number[];
@@ -151,6 +153,25 @@ function computeAnalytics(
   const maxDd = Math.min(...ddCurve);
   const currentDd = ddCurve[ddCurve.length - 1];
 
+  let maxWinStreak = 0;
+  let maxLossStreak = 0;
+  let curWinStreak = 0;
+  let curLossStreak = 0;
+  for (const c of cats) {
+    if (c === "WIN") {
+      curWinStreak++;
+      curLossStreak = 0;
+      if (curWinStreak > maxWinStreak) maxWinStreak = curWinStreak;
+    } else if (c === "LOSS") {
+      curLossStreak++;
+      curWinStreak = 0;
+      if (curLossStreak > maxLossStreak) maxLossStreak = curLossStreak;
+    } else {
+      curWinStreak = 0;
+      curLossStreak = 0;
+    }
+  }
+
   function buildHistBins(
     values: number[],
     cat: string
@@ -259,6 +280,8 @@ function computeAnalytics(
     expR,
     maxDd,
     currentDd,
+    maxWinStreak,
+    maxLossStreak,
     tradeNums,
     eqCurve,
     ddCurve,
@@ -374,6 +397,8 @@ export default function AnalyticsPage() {
           label="DD ACT"
           color={a.currentDd < 0 ? "#F6465D" : "#00B0BD"}
         />
+        <KpiCard value={`${a.maxWinStreak}`} label="RACHA WIN" color="#00B0BD" />
+        <KpiCard value={`${a.maxLossStreak}`} label="RACHA LOSS" color="#F6465D" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -393,6 +418,7 @@ export default function AnalyticsPage() {
             ]}
             layout={{
               title: { text: "CURVA DE EQUITY" },
+              height: 350,
               yaxis: {
                 tickprefix: sym,
                 tickformat: ",.0f",
@@ -405,6 +431,7 @@ export default function AnalyticsPage() {
               },
               margin: { t: 40, b: 0, l: 20, r: 20 },
             }}
+            style={{ height: "350px" }}
           />
           <PlotlyChart
             data={[
@@ -424,6 +451,7 @@ export default function AnalyticsPage() {
               yaxis: { ticksuffix: "%" },
               margin: { t: 10, b: 20, l: 20, r: 20 },
             }}
+            style={{ height: "200px" }}
           />
         </div>
         <div className="lg:col-span-4 space-y-4">

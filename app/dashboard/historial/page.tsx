@@ -67,14 +67,55 @@ export default function HistorialPage() {
     () => getClosedTrades(user!)
   );
 
-  const trades = assignVisualIds(addPnlPct(rawTrades));
+  const tradesWithIds = assignVisualIds(addPnlPct(rawTrades));
+
+  type SortKey =
+    | "visual_id"
+    | "entry_date"
+    | "symbol"
+    | "side"
+    | "quantity"
+    | "result_type"
+    | "entry_price"
+    | "exit_price"
+    | "rr"
+    | "pnl"
+    | "pnl_pct"
+    | "exit_date";
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [msg, setMsg] = useState("");
   const [importing, setImporting] = useState(false);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
+  const [sortKey, setSortKey] = useState<SortKey>("visual_id");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+    setPage(0);
+  }
+
+  const trades = [...tradesWithIds].sort((a, b) => {
+    const key = sortKey;
+    let aVal = a[key];
+    let bVal = b[key];
+    if (aVal == null) aVal = key === "entry_date" || key === "exit_date" ? "" : 0;
+    if (bVal == null) bVal = key === "entry_date" || key === "exit_date" ? "" : 0;
+    let cmp: number;
+    if (typeof aVal === "number" && typeof bVal === "number") {
+      cmp = aVal - bVal;
+    } else {
+      cmp = String(aVal).localeCompare(String(bVal));
+    }
+    return sortDir === "asc" ? cmp : -cmp;
+  });
 
   const totalPages = Math.max(1, Math.ceil(trades.length / pageSize));
   const pagedTrades = trades.slice(page * pageSize, (page + 1) * pageSize);
@@ -228,25 +269,55 @@ export default function HistorialPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-bg text-neutral uppercase text-xs tracking-wider">
-                <th className="px-3 py-2.5 text-center w-8">#</th>
-                <th className="px-3 py-2.5 text-left">Fecha In</th>
-                <th className="px-3 py-2.5 text-left">Symbol</th>
-                <th className="px-3 py-2.5 text-left">Side</th>
-                <th className="px-3 py-2.5 text-right">Qty</th>
-                <th className="px-3 py-2.5 text-center">Resultado</th>
-                <th className="px-3 py-2.5 text-right">In ({sym})</th>
-                <th className="px-3 py-2.5 text-right">Out ({sym})</th>
-                <th className="px-3 py-2.5 text-right">SL ({sym})</th>
+              <tr className="bg-bg uppercase text-xs tracking-wider">
+                {(
+                  [
+                    { key: "visual_id" as SortKey, label: "#", align: "text-center w-8" },
+                    { key: "entry_date" as SortKey, label: "Fecha In", align: "text-left" },
+                    { key: "symbol" as SortKey, label: "Symbol", align: "text-left" },
+                    { key: "side" as SortKey, label: "Side", align: "text-left" },
+                    { key: "quantity" as SortKey, label: "Qty", align: "text-right" },
+                    { key: "result_type" as SortKey, label: "Resultado", align: "text-center" },
+                    { key: "entry_price" as SortKey, label: `In (${sym})`, align: "text-right" },
+                    { key: "exit_price" as SortKey, label: `Out (${sym})`, align: "text-right" },
+                  ] as { key: SortKey; label: string; align: string }[]
+                ).map((col) => (
+                  <th
+                    key={col.key}
+                    onClick={() => handleSort(col.key)}
+                    className={`px-3 py-2.5 ${col.align} cursor-pointer select-none ${sortKey === col.key ? "text-text-main" : "text-neutral"}`}
+                  >
+                    {col.label}{" "}
+                    <span className="text-[10px]">
+                      {sortKey === col.key ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                    </span>
+                  </th>
+                ))}
+                <th className="px-3 py-2.5 text-right text-neutral">SL ({sym})</th>
                 {strategyKeys.map((k) => (
-                  <th key={k} className="px-3 py-2.5 text-left">
+                  <th key={k} className="px-3 py-2.5 text-left text-neutral">
                     {k}
                   </th>
                 ))}
-                <th className="px-3 py-2.5 text-right">R</th>
-                <th className="px-3 py-2.5 text-right">PnL ({sym})</th>
-                <th className="px-3 py-2.5 text-right">PnL %</th>
-                <th className="px-3 py-2.5 text-left">Fecha Out</th>
+                {(
+                  [
+                    { key: "rr" as SortKey, label: "R", align: "text-right" },
+                    { key: "pnl" as SortKey, label: `PnL (${sym})`, align: "text-right" },
+                    { key: "pnl_pct" as SortKey, label: "PnL %", align: "text-right" },
+                    { key: "exit_date" as SortKey, label: "Fecha Out", align: "text-left" },
+                  ] as { key: SortKey; label: string; align: string }[]
+                ).map((col) => (
+                  <th
+                    key={col.key}
+                    onClick={() => handleSort(col.key)}
+                    className={`px-3 py-2.5 ${col.align} cursor-pointer select-none ${sortKey === col.key ? "text-text-main" : "text-neutral"}`}
+                  >
+                    {col.label}{" "}
+                    <span className="text-[10px]">
+                      {sortKey === col.key ? (sortDir === "asc" ? "▲" : "▼") : ""}
+                    </span>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
