@@ -240,8 +240,20 @@ export default function MonteCarloPage() {
 
   const mc = progress;
   const s = mc?.setup;
-  const nShown = mc ? Math.min(50, mc.simCurves.length) : 0;
   const pctDone = mc ? Math.round((mc.completed / mc.total) * 100) : 0;
+
+  const displayCurves = useMemo(() => {
+    if (!mc || mc.simCurves.length === 0) return [];
+    const maxDisplay = 60;
+    const all = mc.simCurves;
+    if (all.length <= maxDisplay) return all;
+    const stride = all.length / maxDisplay;
+    const sampled: number[][] = [];
+    for (let i = 0; i < maxDisplay; i++) {
+      sampled.push(all[Math.floor(i * stride)]);
+    }
+    return sampled;
+  }, [mc]);
 
   const INPUT =
     "bg-bg border border-border rounded px-3 py-2 text-text-main text-sm focus:border-accent outline-none transition";
@@ -377,11 +389,11 @@ export default function MonteCarloPage() {
                   type: "histogram",
                   x: mc.finalRet,
                   nbinsx: calcBins(mc.finalRet),
+                  name: "Retornos",
                   marker: {
-                    color: "#00B0BD",
-                    line: { color: "#181A20", width: 1 },
+                    color: "rgba(0, 176, 189, 0.4)",
+                    line: { color: "#00B0BD", width: 1.5 },
                   },
-                  showlegend: false,
                 },
                 {
                   type: "scatter",
@@ -407,6 +419,8 @@ export default function MonteCarloPage() {
                     : "DISTRIBUCION RETORNOS",
                 },
                 height: 380,
+                showlegend: true,
+                legend: { x: 1, xanchor: "right", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
                 xaxis: { ticksuffix: "%" },
               }}
               style={{ height: "380px" }}
@@ -419,11 +433,11 @@ export default function MonteCarloPage() {
                   type: "histogram",
                   x: mc.maxDd,
                   nbinsx: calcBins(mc.maxDd),
+                  name: "Max Drawdown",
                   marker: {
-                    color: "#F6465D",
-                    line: { color: "#181A20", width: 1 },
+                    color: "rgba(246, 70, 93, 0.4)",
+                    line: { color: "#F6465D", width: 1.5 },
                   },
-                  showlegend: false,
                 },
                 {
                   type: "scatter",
@@ -439,14 +453,14 @@ export default function MonteCarloPage() {
                   x: [stats.medDd, stats.medDd],
                   y: [0, mc.total * 0.15],
                   name: `Mediana: ${stats.medDd.toFixed(1)}%`,
-                  line: { color: "yellow", dash: "dot", width: 2 },
+                  line: { color: "#FCD535", dash: "dot", width: 2 },
                 },
                 {
                   type: "scatter",
                   mode: "lines",
                   x: [stats.p05Dd, stats.p05Dd],
                   y: [0, mc.total * 0.15],
-                  name: `Peor 5%: ${stats.p05Dd.toFixed(1)}%`,
+                  name: `VaR 95%: ${stats.p05Dd.toFixed(1)}%`,
                   line: { color: "cyan", width: 3 },
                 },
               ]}
@@ -457,6 +471,8 @@ export default function MonteCarloPage() {
                     : "DISTRIBUCION MAX DD",
                 },
                 height: 380,
+                showlegend: true,
+                legend: { x: 0, xanchor: "left", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
                 xaxis: { ticksuffix: "%" },
               }}
               style={{ height: "380px" }}
@@ -465,13 +481,13 @@ export default function MonteCarloPage() {
             {/* Sim curves */}
             <PlotlyChart
               data={[
-                ...mc.simCurves.slice(0, nShown).map((curve) => ({
+                ...displayCurves.map((curve, i) => ({
                   type: "scatter" as const,
                   mode: "lines" as const,
                   y: curve,
-                  line: { width: 1 },
-                  opacity: 0.15,
-                  showlegend: false,
+                  line: { width: 1, color: "rgba(0, 176, 189, 0.2)" },
+                  showlegend: i === 0,
+                  name: i === 0 ? "Simulaciones" : undefined,
                   hoverinfo: "skip" as const,
                 })),
                 {
@@ -479,16 +495,18 @@ export default function MonteCarloPage() {
                   mode: "lines" as const,
                   y: stats.medianCurve,
                   name: "Mediana",
-                  line: { color: "#848E9C", width: 3 },
+                  line: { color: "#EAECEF", width: 3 },
                 },
               ]}
               layout={{
                 title: {
                   text: running
-                    ? `PROYECCION (LOG) - ${Math.min(nShown, mc.completed)} curvas (${mc.completed}/${mc.total})`
-                    : `PROYECCION (LOG) - ${nShown} de ${mc.total} curvas`,
+                    ? `PROYECCION (LOG) - ${displayCurves.length} curvas (${mc.completed}/${mc.total})`
+                    : `PROYECCION (LOG) - ${displayCurves.length} de ${mc.total} curvas`,
                 },
                 height: 380,
+                showlegend: true,
+                legend: { x: 0, xanchor: "left", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
                 xaxis: { title: "Trades" },
                 yaxis: { type: "log" },
               }}
@@ -503,8 +521,10 @@ export default function MonteCarloPage() {
                   mode: "lines",
                   x: s.kellyF,
                   y: s.kellyG,
-                  name: "Curva G(f)",
-                  line: { color: "#90A4AE", width: 3 },
+                  name: "G(f)",
+                  line: { color: "rgba(144, 164, 174, 0.8)", width: 3 },
+                  fill: "tozeroy",
+                  fillcolor: "rgba(144, 164, 174, 0.15)",
                 },
                 ...[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
                   .map((m) => {
@@ -521,10 +541,10 @@ export default function MonteCarloPage() {
                       y: [gp],
                       name: `${m}x Kelly`,
                       marker: {
-                        color: m === 1.0 ? "red" : "#FCD535",
+                        color: m === 1.0 ? "#F6465D" : "rgba(252, 213, 53, 0.8)",
                         size: m === 1.0 ? 12 : 8,
                         symbol: m === 1.0 ? "diamond" : "circle",
-                        line: { color: "black", width: 1 },
+                        line: { color: m === 1.0 ? "#F6465D" : "#FCD535", width: 1.5 },
                       },
                       text: [m === 1.0 ? "1.0x (Max)" : `${m}x`],
                       textposition: "top center" as const,
@@ -536,12 +556,13 @@ export default function MonteCarloPage() {
               layout={{
                 title: { text: "CURVA DE CRECIMIENTO VS RIESGO" },
                 height: 380,
+                showlegend: true,
+                legend: { x: 1, xanchor: "right", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
                 xaxis: { title: "Fraccion de Riesgo (f)" },
                 yaxis: {
-                  title: "Tasa crecimiento geometrico esperado (%)",
+                  title: "Tasa crecimiento geometrico (%)",
                   ticksuffix: "%",
                 },
-                showlegend: false,
               }}
               style={{ height: "380px" }}
             />
