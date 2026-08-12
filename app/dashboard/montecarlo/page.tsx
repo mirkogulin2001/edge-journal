@@ -177,6 +177,22 @@ export default function MonteCarloPage() {
     () => getClosedTrades(user!)
   );
 
+  const tradingStats = useMemo(() => {
+    if (closedTrades.length < 2) return null;
+    const dates = closedTrades
+      .map((t) => new Date(t.exit_date || "").getTime())
+      .filter((d) => !isNaN(d))
+      .sort((a, b) => a - b);
+    if (dates.length < 2) return null;
+    const spanMs = dates[dates.length - 1] - dates[0];
+    const spanMonths = Math.max(1, spanMs / (1000 * 60 * 60 * 24 * 30));
+    const tradesPerMonth = Math.round(dates.length / spanMonths);
+    const suggested3m = Math.max(20, tradesPerMonth * 3);
+    const suggested6m = Math.max(30, tradesPerMonth * 6);
+    const suggested12m = Math.max(50, tradesPerMonth * 12);
+    return { tradesPerMonth, suggested3m, suggested6m, suggested12m };
+  }, [closedTrades]);
+
   const [nSims, setNSims] = useState(500);
   const [kellyFrac, setKellyFrac] = useState(0.5);
   const [tradesPerSim, setTradesPerSim] = useState(100);
@@ -184,6 +200,19 @@ export default function MonteCarloPage() {
   const [progress, setProgress] = useState<MCProgress | null>(null);
 
   const runIdRef = useRef(0);
+
+  const warnings = useMemo(() => {
+    const w: string[] = [];
+    if (closedTrades.length > 0 && closedTrades.length < 30)
+      w.push(`Pool chico (${closedTrades.length} trades) — resultados poco confiables`);
+    if (tradesPerSim > closedTrades.length * 5 && closedTrades.length > 0)
+      w.push("Trades por sim muy alto vs historial — asume que tu edge se mantiene indefinidamente");
+    if (tradesPerSim > 300)
+      w.push("Más de 300 trades genera retornos compuestos poco realistas");
+    if (nSims > 1000)
+      w.push("Más de 1000 simulaciones mejora la precisión marginalmente");
+    return w;
+  }, [closedTrades.length, tradesPerSim, nSims]);
 
   const handleRun = useCallback(() => {
     const setup = computeSetup(closedTrades, kellyFrac);
@@ -309,6 +338,43 @@ export default function MonteCarloPage() {
           {running ? `SIMULANDO... ${pctDone}%` : "EJECUTAR"}
         </button>
       </div>
+
+      {/* Smart suggestions */}
+      {tradingStats && !running && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-neutral">
+            Tu ritmo: ~{tradingStats.tradesPerMonth} trades/mes — Proyectar:
+          </span>
+          {[
+            { label: "3 meses", val: tradingStats.suggested3m },
+            { label: "6 meses", val: tradingStats.suggested6m },
+            { label: "12 meses", val: tradingStats.suggested12m },
+          ].map((opt) => (
+            <button
+              key={opt.label}
+              onClick={() => setTradesPerSim(opt.val)}
+              className={`px-2.5 py-1 rounded border transition font-bold ${
+                tradesPerSim === opt.val
+                  ? "border-accent text-accent bg-accent/10"
+                  : "border-border text-neutral hover:text-text-main hover:border-neutral"
+              }`}
+            >
+              {opt.label} ({opt.val})
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Warnings */}
+      {warnings.length > 0 && !running && (
+        <div className="space-y-1">
+          {warnings.map((w, i) => (
+            <p key={i} className="text-xs text-yellow-500/80">
+              ⚠ {w}
+            </p>
+          ))}
+        </div>
+      )}
 
       {running && (
         <div className="w-full bg-border rounded-full h-1.5 overflow-hidden">
