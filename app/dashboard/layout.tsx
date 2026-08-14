@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useSession } from "@/hooks/useSession";
+import ConfigModal from "@/components/ConfigModal";
 
 const TABS = [
   { id: "operativa", label: "OPERATIVA" },
@@ -18,6 +19,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { session, logout } = useSession();
   const router = useRouter();
   const pathname = usePathname();
+  const [configOpen, setConfigOpen] = useState(false);
 
   useEffect(() => {
     if (!session) router.replace("/login");
@@ -40,6 +42,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </span>
         </div>
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setConfigOpen(true)}
+            className="text-neutral hover:text-accent text-sm font-semibold tracking-wide transition"
+          >
+            CONFIG
+          </button>
           <button
             onClick={() => {
               logout();
@@ -76,6 +84,8 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
       {/* Page content */}
       <main className="p-6">{children}</main>
+
+      <ConfigModal open={configOpen} onClose={() => setConfigOpen(false)} />
     </div>
   );
 }
