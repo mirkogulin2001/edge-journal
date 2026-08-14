@@ -307,6 +307,13 @@ export default function AnalyticsPage() {
   const [startBal, setStartBal] = useState(savedBal);
   const [selectedMetric, setSelectedMetric] = useState(strategyKeys[0] || "");
 
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterSymbol, setFilterSymbol] = useState("");
+  const [filterSide, setFilterSide] = useState("");
+  const [filterStrategy, setFilterStrategy] = useState<Record<string, string>>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
   const { data: closedTrades = [] } = useSWR(
     user ? `trades-closed-${user}` : null,
     () => getClosedTrades(user!)
@@ -320,6 +327,41 @@ export default function AnalyticsPage() {
     () => getCashMovements(user!)
   );
 
+  const symbols = useMemo(
+    () => Array.from(new Set(closedTrades.map((t) => t.symbol))).sort(),
+    [closedTrades]
+  );
+
+  const filteredTrades = useMemo(() => {
+    let trades = closedTrades;
+    if (filterFrom) {
+      const from = new Date(filterFrom).getTime();
+      trades = trades.filter(
+        (t) => new Date(t.exit_date || "").getTime() >= from
+      );
+    }
+    if (filterTo) {
+      const to = new Date(filterTo).getTime() + 86400000;
+      trades = trades.filter(
+        (t) => new Date(t.exit_date || "").getTime() < to
+      );
+    }
+    if (filterSymbol) {
+      trades = trades.filter((t) => t.symbol === filterSymbol);
+    }
+    if (filterSide) {
+      trades = trades.filter((t) => t.side === filterSide);
+    }
+    for (const [k, v] of Object.entries(filterStrategy)) {
+      if (v) trades = trades.filter((t) => t.tags?.[k] === v);
+    }
+    return trades;
+  }, [closedTrades, filterFrom, filterTo, filterSymbol, filterSide, filterStrategy]);
+
+  const hasActiveFilters =
+    !!filterFrom || !!filterTo || !!filterSymbol || !!filterSide ||
+    Object.values(filterStrategy).some(Boolean);
+
   const cashNetFlows = cashMovements.reduce(
     (s: number, m: CashMovement) =>
       s + (m.movement_type === "APORTE" ? m.amount : -m.amount),
@@ -328,8 +370,8 @@ export default function AnalyticsPage() {
 
   const analytics = useMemo(
     () =>
-      computeAnalytics(closedTrades, openTrades, startBal, config, cashNetFlows),
-    [closedTrades, openTrades, startBal, config, cashNetFlows]
+      computeAnalytics(filteredTrades, openTrades, startBal, config, cashNetFlows),
+    [filteredTrades, openTrades, startBal, config, cashNetFlows]
   );
 
   async function handleBalanceChange(val: number) {
@@ -355,12 +397,44 @@ export default function AnalyticsPage() {
 
   const a = analytics;
 
+  function clearFilters() {
+    setFilterFrom("");
+    setFilterTo("");
+    setFilterSymbol("");
+    setFilterSide("");
+    setFilterStrategy({});
+  }
+
+  const INPUT_CLS =
+    "bg-bg border border-border rounded px-3 py-1.5 text-text-main text-sm focus:border-accent outline-none";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <h2 className="text-sm font-semibold tracking-wider text-text-main">
-          METRICAS DE SISTEMA
-        </h2>
+        <div className="flex items-center gap-3">
+          <h2 className="text-sm font-semibold tracking-wider text-text-main">
+            METRICAS DE SISTEMA
+          </h2>
+          <button
+            onClick={() => setFiltersOpen((o) => !o)}
+            className={`text-xs font-bold px-3 py-1 rounded border transition ${
+              hasActiveFilters
+                ? "border-accent text-accent bg-accent/10"
+                : "border-border text-neutral hover:text-text-main"
+            }`}
+          >
+            {filtersOpen ? "OCULTAR FILTROS" : "FILTROS"}
+            {hasActiveFilters && ` (${filteredTrades.length}/${closedTrades.length})`}
+          </button>
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="text-xs text-negative font-bold hover:text-negative/80 transition"
+            >
+              LIMPIAR
+            </button>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-neutral font-bold">
             CAPITAL INICIAL ({sym})
@@ -369,10 +443,84 @@ export default function AnalyticsPage() {
             type="number"
             value={startBal}
             onChange={(e) => handleBalanceChange(Number(e.target.value))}
-            className="w-32 bg-bg border border-border rounded px-3 py-1.5 text-text-main text-sm focus:border-accent outline-none"
+            className={`w-32 ${INPUT_CLS}`}
           />
         </div>
       </div>
+
+      {filtersOpen && (
+        <div className="flex flex-wrap gap-3 p-4 bg-card rounded border border-border">
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">DESDE</label>
+            <input
+              type="date"
+              value={filterFrom}
+              onChange={(e) => setFilterFrom(e.target.value)}
+              className={`w-36 ${INPUT_CLS}`}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">HASTA</label>
+            <input
+              type="date"
+              value={filterTo}
+              onChange={(e) => setFilterTo(e.target.value)}
+              className={`w-36 ${INPUT_CLS}`}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">ACTIVO</label>
+            <select
+              value={filterSymbol}
+              onChange={(e) => setFilterSymbol(e.target.value)}
+              className={`w-32 ${INPUT_CLS}`}
+            >
+              <option value="">Todos</option>
+              {symbols.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">SIDE</label>
+            <select
+              value={filterSide}
+              onChange={(e) => setFilterSide(e.target.value)}
+              className={`w-28 ${INPUT_CLS}`}
+            >
+              <option value="">Todos</option>
+              <option value="LONG">LONG</option>
+              <option value="SHORT">SHORT</option>
+            </select>
+          </div>
+          {strategyKeys.map((k) => {
+            const opts = typeof config[k] === "string"
+              ? (config[k] as string).split(",").map((v: string) => v.trim()).filter(Boolean)
+              : Array.isArray(config[k])
+                ? (config[k] as string[])
+                : [];
+            return (
+              <div key={k}>
+                <label className="block text-[10px] text-neutral font-bold mb-1">
+                  {k.toUpperCase()}
+                </label>
+                <select
+                  value={filterStrategy[k] || ""}
+                  onChange={(e) =>
+                    setFilterStrategy((prev) => ({ ...prev, [k]: e.target.value }))
+                  }
+                  className={`w-32 ${INPUT_CLS}`}
+                >
+                  <option value="">Todos</option>
+                  {opts.map((v: string) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex gap-3 overflow-x-auto pb-2">
         <KpiCard
