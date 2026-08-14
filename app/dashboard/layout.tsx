@@ -7,6 +7,7 @@ import { useSession } from "@/hooks/useSession";
 import ConfigModal from "@/components/ConfigModal";
 
 const TABS = [
+  { id: "home", label: "HOME" },
   { id: "operativa", label: "OPERATIVA" },
   { id: "historial", label: "HISTORIAL" },
   { id: "analytics", label: "ANALYTICS" },
@@ -27,7 +28,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
 
   if (!session) return null;
 
-  const activeTab = pathname.split("/").pop() || "operativa";
+  const activeTab = pathname === "/dashboard" ? "home" : (pathname.split("/").pop() || "home");
 
   return (
     <div className="min-h-screen bg-bg">
@@ -68,7 +69,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             return (
               <Link
                 key={tab.id}
-                href={`/dashboard/${tab.id}`}
+                href={tab.id === "home" ? "/dashboard" : `/dashboard/${tab.id}`}
                 className={`px-4 py-3.5 text-sm font-semibold tracking-wider whitespace-nowrap transition-colors ${
                   isActive
                     ? "text-text-main border-b-[3px] border-accent"
