@@ -356,7 +356,7 @@ export default function PerformancePage() {
                 x: rows.map((r) => r.date),
                 y: rows.map((r) => r.spy_return),
                 name: benchName,
-                line: { color: "#555555", width: 1, dash: "dash" },
+                line: { color: "#555555", width: 1.5, dash: "dash", shape: "spline", smoothing: 1.0 },
               },
               {
                 type: "scatter",
@@ -364,9 +364,9 @@ export default function PerformancePage() {
                 x: rows.map((r) => r.date),
                 y: rows.map((r) => r.cumulative_return * 100),
                 name: "Retorno Acumulado",
-                line: { color: "#00B0BD", width: 2.5 },
+                line: { color: "#00B0BD", width: 2.5, shape: "spline", smoothing: 1.0 },
                 fill: "tozeroy",
-                fillcolor: "rgba(0, 176, 189, 0.15)",
+                fillcolor: "rgba(0, 176, 189, 0.06)",
                 hovertemplate:
                   "%{x|%Y-%m-%d}<br>Retorno: %{y:.2f}%<extra></extra>",
               },
@@ -374,13 +374,9 @@ export default function PerformancePage() {
             layout={{
               title: {
                 text: `RETORNO ACUMULADO (%) — ${periodLabel}`,
-                font: { size: 14, color: "#EAECEF" },
-                x: 0.5,
-                xanchor: "center",
               },
               hovermode: "x unified",
               yaxis: {
-                title: "Retorno (%)",
                 ticksuffix: "%",
               },
               xaxis: { showgrid: false },
@@ -393,10 +389,10 @@ export default function PerformancePage() {
                   x0: 0,
                   x1: 1,
                   xref: "paper",
-                  line: { color: "#848E9C", width: 1, dash: "dash" },
+                  line: { color: "rgba(132, 142, 156, 0.4)", width: 1, dash: "dash" },
                 },
               ],
-              margin: { l: 60, r: 30, t: 50, b: 10 },
+              margin: { l: 55, r: 20, t: 36, b: 10 },
             }}
           />
 
@@ -408,26 +404,21 @@ export default function PerformancePage() {
                 x: rows.map((r) => r.date),
                 y: kpis.drawdowns,
                 name: "Drawdown",
-                line: { color: "#F6465D", width: 1.5 },
+                line: { color: "#F6465D", width: 1.5, shape: "spline", smoothing: 1.0 },
                 fill: "tozeroy",
-                fillcolor: "rgba(246, 70, 93, 0.2)",
+                fillcolor: "rgba(246, 70, 93, 0.08)",
                 hovertemplate:
                   "%{x|%Y-%m-%d}<br>DD: %{y:.2f}%<extra></extra>",
               },
             ]}
             layout={{
-              title: {
-                text: "DRAWDOWN (%)",
-                font: { size: 14, color: "#EAECEF" },
-                x: 0.5,
-                xanchor: "center",
-              },
+              title: { text: "DRAWDOWN (%)" },
               height: 250,
               hovermode: "x unified",
-              yaxis: { title: "DD (%)", ticksuffix: "%" },
-              xaxis: { title: "Fecha", showgrid: false },
+              yaxis: { ticksuffix: "%" },
+              xaxis: { showgrid: false },
               showlegend: false,
-              margin: { l: 60, r: 30, t: 40, b: 30 },
+              margin: { l: 55, r: 20, t: 36, b: 30 },
             }}
           />
         </>

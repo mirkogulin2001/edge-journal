@@ -280,11 +280,12 @@ export default function DashboardHomePage() {
                 y: equityCurve.y,
                 line: {
                   color: COLOR_POS,
-                  width: 2,
+                  width: 2.5,
                   shape: "spline",
+                  smoothing: 1.0,
                 },
                 fill: "tozeroy",
-                fillcolor: "rgba(0, 176, 189, 0.08)",
+                fillcolor: "rgba(0, 176, 189, 0.06)",
                 hovertemplate: `%{x}<br>${sym}%{y:,.0f}<extra></extra>`,
               },
             ]}
@@ -293,16 +294,10 @@ export default function DashboardHomePage() {
               margin: { l: 50, r: 20, t: 10, b: 30 },
               xaxis: {
                 showgrid: false,
-                zerolinecolor: "#2B3139",
-                tickfont: { size: 10, color: COLOR_NEUTRAL },
               },
               yaxis: {
-                showgrid: true,
-                gridcolor: "rgba(43, 49, 57, 0.5)",
-                zerolinecolor: "#2B3139",
                 tickprefix: sym,
                 tickformat: ",.0f",
-                tickfont: { size: 10, color: COLOR_NEUTRAL },
               },
             }}
           />

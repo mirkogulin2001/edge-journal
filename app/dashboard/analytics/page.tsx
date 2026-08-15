@@ -558,9 +558,9 @@ export default function AnalyticsPage() {
                 mode: "lines",
                 x: a.tradeNums,
                 y: a.eqCurve,
-                line: { color: "#00B0BD", width: 3 },
+                line: { color: "#00B0BD", width: 2.5, shape: "spline", smoothing: 1.0 },
                 fill: "tozeroy",
-                fillcolor: "rgba(0, 176, 189, 0.2)",
+                fillcolor: "rgba(0, 176, 189, 0.08)",
                 hovertemplate: `Trade %{x}<br>${sym}%{y:,.2f}<extra></extra>`,
               },
             ]}
@@ -577,7 +577,8 @@ export default function AnalyticsPage() {
                     (Math.max(...a.eqCurve) - Math.min(...a.eqCurve)) * 0.1,
                 ],
               },
-              margin: { t: 40, b: 0, l: 20, r: 20 },
+              xaxis: { showgrid: false },
+              margin: { t: 36, b: 4, l: 55, r: 20 },
             }}
             style={{ height: "350px" }}
           />
@@ -588,16 +589,17 @@ export default function AnalyticsPage() {
                 mode: "lines",
                 x: a.tradeNums,
                 y: a.ddCurve,
-                line: { color: "#F6465D" },
+                line: { color: "#F6465D", width: 1.5, shape: "spline", smoothing: 1.0 },
                 fill: "tozeroy",
-                fillcolor: "rgba(246, 70, 93, 0.2)",
+                fillcolor: "rgba(246, 70, 93, 0.08)",
               },
             ]}
             layout={{
               title: { text: "DRAWDOWN (%)" },
               height: 200,
               yaxis: { ticksuffix: "%" },
-              margin: { t: 10, b: 20, l: 20, r: 20 },
+              xaxis: { showgrid: false },
+              margin: { t: 10, b: 20, l: 55, r: 20 },
             }}
             style={{ height: "200px" }}
           />
@@ -635,12 +637,21 @@ export default function AnalyticsPage() {
                       marker: {
                         color: a.histBins.map((b) =>
                           b.cat === "WIN"
-                            ? "#00B0BD"
+                            ? "rgba(0, 176, 189, 0.4)"
                             : b.cat === "LOSS"
-                              ? "#F6465D"
-                              : "#848E9C"
+                              ? "rgba(246, 70, 93, 0.4)"
+                              : "rgba(132, 142, 156, 0.35)"
                         ),
-                        line: { color: "#181A20", width: 1.5 },
+                        line: {
+                          color: a.histBins.map((b) =>
+                            b.cat === "WIN"
+                              ? "#00B0BD"
+                              : b.cat === "LOSS"
+                                ? "#F6465D"
+                                : "#848E9C"
+                          ),
+                          width: 1,
+                        },
                       },
                       text: a.histBins.map((b) => `${b.count}`),
                       textposition: "outside",
@@ -652,10 +663,9 @@ export default function AnalyticsPage() {
             layout={{
               title: { text: "DISTRIBUCION PNL" },
               height: 380,
-              bargap: 0.05,
-              xaxis: { title: `Rango de PnL (${sym})` },
-              yaxis: { title: "Cantidad de Trades" },
-              margin: { t: 40, b: 60, l: 40, r: 20 },
+              bargap: 0.08,
+              xaxis: { showgrid: false },
+              margin: { t: 36, b: 60, l: 40, r: 20 },
             }}
             style={{ height: "380px" }}
           />
@@ -671,7 +681,7 @@ export default function AnalyticsPage() {
               x: a.tradeNums,
               y: a.cumWinRate,
               name: "Win Rate",
-              line: { color: "#00B0BD", width: 2 },
+              line: { color: "#00B0BD", width: 2, shape: "spline", smoothing: 1.0 },
             },
             {
               type: "scatter",
@@ -679,7 +689,7 @@ export default function AnalyticsPage() {
               x: a.tradeNums,
               y: a.cumLossRate,
               name: "Loss Rate",
-              line: { color: "#F6465D", width: 2 },
+              line: { color: "#F6465D", width: 2, shape: "spline", smoothing: 1.0 },
             },
             {
               type: "scatter",
@@ -687,13 +697,14 @@ export default function AnalyticsPage() {
               x: a.tradeNums,
               y: a.cumBeRate,
               name: "BE Rate",
-              line: { color: "#848E9C", width: 2 },
+              line: { color: "#848E9C", width: 2, shape: "spline", smoothing: 1.0 },
             },
           ]}
           layout={{
             title: { text: "EVOLUCION TASAS (%)" },
             height: 350,
             yaxis: { ticksuffix: "%" },
+            xaxis: { showgrid: false },
             hovermode: "x unified",
             showlegend: true,
             legend: {
@@ -702,6 +713,7 @@ export default function AnalyticsPage() {
               y: 1.02,
               xanchor: "right",
               x: 1,
+              font: { size: 11, color: "#848E9C" },
             },
           }}
           style={{ height: "350px" }}
@@ -714,9 +726,9 @@ export default function AnalyticsPage() {
               x: a.tradeNums,
               y: a.cumRatio,
               name: "Ratio R/B",
-              line: { color: "#FCD535", width: 2 },
+              line: { color: "#FCD535", width: 2, shape: "spline", smoothing: 1.0 },
               fill: "tozeroy",
-              fillcolor: "rgba(252, 213, 53, 0.1)",
+              fillcolor: "rgba(252, 213, 53, 0.06)",
             },
           ]}
           layout={{
@@ -724,6 +736,7 @@ export default function AnalyticsPage() {
             height: 350,
             showlegend: false,
             hovermode: "x unified",
+            xaxis: { showgrid: false },
           }}
           style={{ height: "350px" }}
         />
@@ -735,9 +748,9 @@ export default function AnalyticsPage() {
               x: a.tradeNums,
               y: a.cumEdge,
               name: "Esperanza",
-              line: { color: "#00B0BD", width: 2.5 },
+              line: { color: "#00B0BD", width: 2.5, shape: "spline", smoothing: 1.0 },
               fill: "tozeroy",
-              fillcolor: "rgba(0, 176, 189, 0.15)",
+              fillcolor: "rgba(0, 176, 189, 0.08)",
               hovertemplate: "Trade %{x}<br>Edge: %{y:.2f}R<extra></extra>",
             },
           ]}
@@ -746,6 +759,7 @@ export default function AnalyticsPage() {
             height: 350,
             showlegend: false,
             hovermode: "x unified",
+            xaxis: { showgrid: false },
             yaxis: { ticksuffix: "R" },
             shapes: [
               {
@@ -817,11 +831,10 @@ export default function AnalyticsPage() {
                 layout={{
                   title: { text: `PNL POR ${selectedMetric.toUpperCase()}` },
                   bargap: 0.35,
+                  xaxis: { showgrid: false },
                   yaxis: {
                     tickprefix: sym,
                     tickformat: ",.0f",
-                    gridcolor: "rgba(43, 49, 57, 0.5)",
-                    zerolinecolor: "#2B3139",
                   },
                 }}
               />
@@ -853,10 +866,7 @@ export default function AnalyticsPage() {
                     text: `TRADES POR ${selectedMetric.toUpperCase()}`,
                   },
                   bargap: 0.35,
-                  yaxis: {
-                    gridcolor: "rgba(43, 49, 57, 0.5)",
-                    zerolinecolor: "#2B3139",
-                  },
+                  xaxis: { showgrid: false },
                 }}
               />
             </div>

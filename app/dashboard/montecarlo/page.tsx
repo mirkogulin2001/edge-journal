@@ -457,8 +457,8 @@ export default function MonteCarloPage() {
                   nbinsx: calcBins(mc.finalRet),
                   name: "Retornos",
                   marker: {
-                    color: "rgba(0, 176, 189, 0.4)",
-                    line: { color: "#00B0BD", width: 1.5 },
+                    color: "rgba(0, 176, 189, 0.35)",
+                    line: { color: "#00B0BD", width: 1 },
                   },
                 },
                 {
@@ -486,8 +486,8 @@ export default function MonteCarloPage() {
                 },
                 height: 380,
                 showlegend: true,
-                legend: { x: 1, xanchor: "right", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
-                xaxis: { ticksuffix: "%" },
+                legend: { x: 1, xanchor: "right", y: 1, bgcolor: "rgba(24,26,32,0.6)", font: { size: 10, color: "#848E9C" }, bordercolor: "transparent" },
+                xaxis: { ticksuffix: "%", showgrid: false },
               }}
               style={{ height: "380px" }}
             />
@@ -501,8 +501,8 @@ export default function MonteCarloPage() {
                   nbinsx: calcBins(mc.maxDd),
                   name: "Max Drawdown",
                   marker: {
-                    color: "rgba(246, 70, 93, 0.4)",
-                    line: { color: "#F6465D", width: 1.5 },
+                    color: "rgba(246, 70, 93, 0.35)",
+                    line: { color: "#F6465D", width: 1 },
                   },
                 },
                 {
@@ -527,7 +527,7 @@ export default function MonteCarloPage() {
                   x: [stats.p05Dd, stats.p05Dd],
                   y: [0, mc.total * 0.15],
                   name: `VaR 95%: ${stats.p05Dd.toFixed(1)}%`,
-                  line: { color: "cyan", width: 3 },
+                  line: { color: "cyan", width: 2.5 },
                 },
               ]}
               layout={{
@@ -538,8 +538,8 @@ export default function MonteCarloPage() {
                 },
                 height: 380,
                 showlegend: true,
-                legend: { x: 0, xanchor: "left", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
-                xaxis: { ticksuffix: "%" },
+                legend: { x: 0, xanchor: "left", y: 1, bgcolor: "rgba(24,26,32,0.6)", font: { size: 10, color: "#848E9C" }, bordercolor: "transparent" },
+                xaxis: { ticksuffix: "%", showgrid: false },
               }}
               style={{ height: "380px" }}
             />
@@ -572,8 +572,8 @@ export default function MonteCarloPage() {
                 },
                 height: 380,
                 showlegend: true,
-                legend: { x: 0, xanchor: "left", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
-                xaxis: { title: "Trades" },
+                legend: { x: 0, xanchor: "left", y: 1, bgcolor: "rgba(24,26,32,0.6)", font: { size: 10, color: "#848E9C" }, bordercolor: "transparent" },
+                xaxis: { showgrid: false },
                 yaxis: { type: "log" },
               }}
               style={{ height: "380px" }}
@@ -588,9 +588,9 @@ export default function MonteCarloPage() {
                   x: s.kellyF,
                   y: s.kellyG,
                   name: "G(f)",
-                  line: { color: "rgba(144, 164, 174, 0.8)", width: 3 },
+                  line: { color: "rgba(144, 164, 174, 0.8)", width: 2.5, shape: "spline", smoothing: 1.0 },
                   fill: "tozeroy",
-                  fillcolor: "rgba(144, 164, 174, 0.15)",
+                  fillcolor: "rgba(144, 164, 174, 0.08)",
                 },
                 ...[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
                   .map((m) => {
@@ -623,10 +623,9 @@ export default function MonteCarloPage() {
                 title: { text: "CURVA DE CRECIMIENTO VS RIESGO" },
                 height: 380,
                 showlegend: true,
-                legend: { x: 1, xanchor: "right", y: 1, bgcolor: "rgba(24,26,32,0.7)", font: { size: 10 } },
-                xaxis: { title: "Fraccion de Riesgo (f)" },
+                legend: { x: 1, xanchor: "right", y: 1, bgcolor: "rgba(24,26,32,0.6)", font: { size: 10, color: "#848E9C" }, bordercolor: "transparent" },
+                xaxis: { showgrid: false },
                 yaxis: {
-                  title: "Tasa crecimiento geometrico (%)",
                   ticksuffix: "%",
                 },
               }}
