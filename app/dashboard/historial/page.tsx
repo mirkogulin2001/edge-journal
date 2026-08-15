@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import { useSession } from "@/hooks/useSession";
 import {
   getClosedTrades,
@@ -14,15 +14,94 @@ import { curSym, fmtMoney2, getStrategyKeys } from "@/lib/calculations/helpers";
 import type { Trade, ClosedTradeWithPct } from "@/types/trade";
 import useSWR from "swr";
 
+interface MergedTrade extends ClosedTradeWithPct {
+  closes_count: number;
+  child_trades: ClosedTradeWithPct[];
+  child_ids: number[];
+}
+
 function addPnlPct(trades: Trade[]): ClosedTradeWithPct[] {
-  return trades.map((t, _i, arr) => {
+  return trades.map((t) => {
     const cost = t.entry_price * t.quantity;
     const pnlPct = cost > 0 && t.pnl != null ? (t.pnl / cost) * 100 : 0;
     return { ...t, pnl_pct: Math.round(pnlPct * 100) / 100 };
   });
 }
 
-function assignVisualIds(trades: ClosedTradeWithPct[]): ClosedTradeWithPct[] {
+function groupKey(t: Trade): string {
+  return `${t.symbol}|${t.side}|${t.entry_price}|${t.entry_date}|${t.initial_stop_loss}`;
+}
+
+function mergeTrades(trades: ClosedTradeWithPct[]): MergedTrade[] {
+  const groups = new Map<string, ClosedTradeWithPct[]>();
+  const order: string[] = [];
+
+  for (const t of trades) {
+    const key = groupKey(t);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(t);
+  }
+
+  return order.map((key) => {
+    const group = groups.get(key)!;
+
+    if (group.length === 1) {
+      return {
+        ...group[0],
+        closes_count: 1,
+        child_trades: group,
+        child_ids: [group[0].id],
+      };
+    }
+
+    const sorted = [...group].sort((a, b) =>
+      (a.exit_date || "").localeCompare(b.exit_date || "")
+    );
+
+    const totalQty = group.reduce((s, t) => s + t.quantity, 0);
+    const totalPnl = group.reduce((s, t) => s + (t.pnl ?? 0), 0);
+    const weightedExitPrice =
+      totalQty > 0
+        ? group.reduce((s, t) => s + (t.exit_price ?? 0) * t.quantity, 0) /
+          totalQty
+        : 0;
+    const latestExitDate = group.reduce((latest, t) => {
+      const d = t.exit_date || "";
+      return d > latest ? d : latest;
+    }, "");
+    const cost = group[0].entry_price * totalQty;
+    const pnlPct = cost > 0 ? (totalPnl / cost) * 100 : 0;
+
+    const slDiff =
+      group[0].side === "LONG"
+        ? group[0].entry_price - group[0].initial_stop_loss
+        : group[0].initial_stop_loss - group[0].entry_price;
+    const rr = slDiff > 0 ? totalPnl / (slDiff * totalQty) : undefined;
+
+    const resultType: "WIN" | "LOSS" | "BE" =
+      totalPnl > 0.01 ? "WIN" : totalPnl < -0.01 ? "LOSS" : "BE";
+
+    return {
+      ...group[0],
+      id: group[0].id,
+      quantity: totalQty,
+      exit_price: Math.round(weightedExitPrice * 100) / 100,
+      exit_date: latestExitDate,
+      pnl: Math.round(totalPnl * 100) / 100,
+      rr: rr != null ? Math.round(rr * 100) / 100 : undefined,
+      result_type: resultType,
+      pnl_pct: Math.round(pnlPct * 100) / 100,
+      closes_count: group.length,
+      child_trades: sorted,
+      child_ids: group.map((t) => t.id),
+    };
+  });
+}
+
+function assignVisualIds(trades: MergedTrade[]): MergedTrade[] {
   const sorted = [...trades].sort(
     (a, b) =>
       new Date(a.exit_date || "").getTime() -
@@ -67,7 +146,10 @@ export default function HistorialPage() {
     () => getClosedTrades(user!)
   );
 
-  const tradesWithIds = assignVisualIds(addPnlPct(rawTrades));
+  const mergedTrades = useMemo(
+    () => assignVisualIds(mergeTrades(addPnlPct(rawTrades))),
+    [rawTrades]
+  );
 
   type SortKey =
     | "visual_id"
@@ -83,7 +165,8 @@ export default function HistorialPage() {
     | "pnl_pct"
     | "exit_date";
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState("");
   const [importing, setImporting] = useState(false);
   const [page, setPage] = useState(0);
@@ -102,7 +185,7 @@ export default function HistorialPage() {
     setPage(0);
   }
 
-  const trades = [...tradesWithIds].sort((a, b) => {
+  const trades = [...mergedTrades].sort((a, b) => {
     const key = sortKey;
     let aVal = a[key];
     let bVal = b[key];
@@ -120,13 +203,41 @@ export default function HistorialPage() {
   const totalPages = Math.max(1, Math.ceil(trades.length / pageSize));
   const pagedTrades = trades.slice(page * pageSize, (page + 1) * pageSize);
 
+  function toggleExpand(t: MergedTrade) {
+    const key = groupKey(t);
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function handleRowClick(t: MergedTrade) {
+    if (t.closes_count > 1) {
+      toggleExpand(t);
+    } else {
+      const isSelected = selectedIds.length === 1 && selectedIds[0] === t.id;
+      setSelectedIds(isSelected ? [] : [t.id]);
+    }
+  }
+
+  function handleChildClick(childId: number) {
+    const isSelected = selectedIds.length === 1 && selectedIds[0] === childId;
+    setSelectedIds(isSelected ? [] : [childId]);
+  }
+
   async function handleDeleteSelected() {
-    if (selectedId == null) return;
+    if (selectedIds.length === 0) return;
     if (!confirm("¿Eliminar este trade del historial?")) return;
-    const ok = await deleteTrade(selectedId);
-    if (ok) {
+    let allOk = true;
+    for (const id of selectedIds) {
+      const ok = await deleteTrade(id);
+      if (!ok) allOk = false;
+    }
+    if (allOk) {
       setMsg("Trade eliminado.");
-      setSelectedId(null);
+      setSelectedIds([]);
       mutateTrades();
     } else {
       setMsg("Error al eliminar");
@@ -228,8 +339,16 @@ export default function HistorialPage() {
     [user, mutateTrades]
   );
 
+  const totalRawTrades = rawTrades.length;
+
   const INPUT =
     "bg-bg border border-border rounded px-3 py-2 text-text-main focus:border-accent outline-none transition text-sm";
+
+  function resultColor(rt?: string) {
+    if (rt === "WIN") return "text-accent";
+    if (rt === "LOSS") return "text-negative";
+    return "text-neutral";
+  }
 
   return (
     <div className="space-y-4">
@@ -237,7 +356,7 @@ export default function HistorialPage() {
       <div className="flex flex-wrap items-center gap-3">
         <button
           onClick={handleDeleteSelected}
-          disabled={selectedId == null}
+          disabled={selectedIds.length === 0}
           className="px-4 py-2 border border-border rounded text-sm font-bold text-text-main hover:border-accent transition disabled:opacity-30 disabled:cursor-not-allowed"
         >
           BORRAR SELECCION
@@ -259,6 +378,11 @@ export default function HistorialPage() {
             disabled={importing}
           />
         </label>
+        {mergedTrades.length !== totalRawTrades && (
+          <span className="text-xs text-neutral">
+            {mergedTrades.length} operaciones ({totalRawTrades} registros)
+          </span>
+        )}
         {msg && (
           <span className="text-sm font-semibold text-accent">{msg}</span>
         )}
@@ -331,25 +455,21 @@ export default function HistorialPage() {
                   </td>
                 </tr>
               ) : (
-                pagedTrades.map((t, i) => {
-                  const isSelected = selectedId === t.id;
+                pagedTrades.flatMap((t, i) => {
+                  const isExpanded =
+                    t.closes_count > 1 && expandedKeys.has(groupKey(t));
+                  const isGroupSelected =
+                    selectedIds.length > 0 &&
+                    t.child_ids.some((id) => selectedIds.includes(id));
                   const pnl = t.pnl ?? 0;
                   const pnlPct = t.pnl_pct;
-                  const resultColor =
-                    t.result_type === "WIN"
-                      ? "text-accent"
-                      : t.result_type === "LOSS"
-                        ? "text-negative"
-                        : "text-neutral";
 
-                  return (
+                  const mainRow = (
                     <tr
-                      key={t.id}
-                      onClick={() =>
-                        setSelectedId(isSelected ? null : t.id)
-                      }
+                      key={`main-${t.id}`}
+                      onClick={() => handleRowClick(t)}
                       className={`cursor-pointer transition-colors ${
-                        isSelected
+                        isGroupSelected
                           ? "bg-accent/10"
                           : i % 2 === 1
                             ? "bg-row-odd hover:bg-neutral/5"
@@ -360,7 +480,14 @@ export default function HistorialPage() {
                         {t.visual_id}
                       </td>
                       <td className="px-3 py-2">{t.entry_date}</td>
-                      <td className="px-3 py-2 font-semibold">{t.symbol}</td>
+                      <td className="px-3 py-2 font-semibold">
+                        {t.symbol}
+                        {t.closes_count > 1 && (
+                          <span className="ml-1.5 text-[10px] font-bold text-neutral bg-neutral/15 px-1.5 py-0.5 rounded">
+                            {isExpanded ? "▾" : "▸"} {t.closes_count} cierres
+                          </span>
+                        )}
+                      </td>
                       <td
                         className={`px-3 py-2 font-semibold ${
                           t.side === "LONG" ? "text-accent" : "text-negative"
@@ -369,7 +496,7 @@ export default function HistorialPage() {
                         {t.side}
                       </td>
                       <td className="px-3 py-2 text-right">{t.quantity}</td>
-                      <td className={`px-3 py-2 text-center font-bold ${resultColor}`}>
+                      <td className={`px-3 py-2 text-center font-bold ${resultColor(t.result_type)}`}>
                         {t.result_type}
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -411,6 +538,99 @@ export default function HistorialPage() {
                       <td className="px-3 py-2">{t.exit_date || ""}</td>
                     </tr>
                   );
+
+                  if (!isExpanded) return [mainRow];
+
+                  const childRows = t.child_trades.map((child) => {
+                    const childPnl = child.pnl ?? 0;
+                    const childCost = child.entry_price * child.quantity;
+                    const childPnlPct =
+                      childCost > 0 ? (childPnl / childCost) * 100 : 0;
+                    const isChildSelected = selectedIds.includes(child.id);
+
+                    return (
+                      <tr
+                        key={`child-${child.id}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleChildClick(child.id);
+                        }}
+                        className={`cursor-pointer transition-colors border-l-2 border-accent/30 ${
+                          isChildSelected
+                            ? "bg-accent/15"
+                            : "bg-bg/50 hover:bg-neutral/5"
+                        }`}
+                      >
+                        <td className="px-3 py-1.5 text-center text-neutral text-[10px]">
+                          └
+                        </td>
+                        <td className="px-3 py-1.5 text-neutral text-xs">
+                          {child.entry_date}
+                        </td>
+                        <td className="px-3 py-1.5 text-neutral text-xs">
+                          {child.symbol}
+                        </td>
+                        <td
+                          className={`px-3 py-1.5 text-xs ${
+                            child.side === "LONG"
+                              ? "text-accent/70"
+                              : "text-negative/70"
+                          }`}
+                        >
+                          {child.side}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-xs text-neutral">
+                          {child.quantity}
+                        </td>
+                        <td
+                          className={`px-3 py-1.5 text-center text-xs font-bold ${resultColor(child.result_type)}`}
+                        >
+                          {child.result_type}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-xs text-neutral">
+                          {sym}
+                          {child.entry_price.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-xs text-neutral">
+                          {child.exit_price != null
+                            ? `${sym}${child.exit_price.toFixed(2)}`
+                            : ""}
+                        </td>
+                        <td className="px-3 py-1.5 text-right text-xs text-neutral">
+                          {child.initial_stop_loss
+                            ? `${sym}${child.initial_stop_loss.toFixed(2)}`
+                            : ""}
+                        </td>
+                        {strategyKeys.map((k) => (
+                          <td key={k} className="px-3 py-1.5 text-neutral text-xs">
+                            {child.tags?.[k] || ""}
+                          </td>
+                        ))}
+                        <td className="px-3 py-1.5 text-right text-xs text-neutral">
+                          {child.rr != null ? `${child.rr.toFixed(2)}R` : ""}
+                        </td>
+                        <td
+                          className={`px-3 py-1.5 text-right text-xs font-semibold ${
+                            childPnl >= 0 ? "text-accent" : "text-negative"
+                          }`}
+                        >
+                          {fmtMoney2(childPnl, sym)}
+                        </td>
+                        <td
+                          className={`px-3 py-1.5 text-right text-xs ${
+                            childPnlPct >= 0 ? "text-accent" : "text-negative"
+                          }`}
+                        >
+                          {childPnlPct.toFixed(2)}%
+                        </td>
+                        <td className="px-3 py-1.5 text-xs text-neutral">
+                          {child.exit_date || ""}
+                        </td>
+                      </tr>
+                    );
+                  });
+
+                  return [mainRow, ...childRows];
                 })
               )}
             </tbody>
@@ -438,7 +658,7 @@ export default function HistorialPage() {
               ))}
             </select>
             <span className="text-xs text-neutral">
-              de {trades.length} trades
+              de {trades.length} operaciones
             </span>
           </div>
           <div className="flex items-center gap-1">
