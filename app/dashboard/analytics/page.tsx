@@ -14,6 +14,7 @@ import {
 } from "@/lib/calculations/helpers";
 import type { Trade } from "@/types/trade";
 import type { CashMovement } from "@/types/cashMovement";
+import type { MfeMaeEntry } from "@/app/api/mfe-mae/route";
 import useSWR from "swr";
 import KpiCard from "@/components/ui/KpiCard";
 import PlotlyChart from "@/components/ui/PlotlyChart";
@@ -327,6 +328,14 @@ export default function AnalyticsPage() {
     () => getCashMovements(user!)
   );
 
+  const { data: mfeMaeData = {} } = useSWR<Record<string, MfeMaeEntry>>(
+    user ? `mfe-mae-${user}` : null,
+    async () => {
+      const res = await fetch(`/api/mfe-mae?username=${encodeURIComponent(user!)}`);
+      return res.json();
+    }
+  );
+
   const symbols = useMemo(
     () => Array.from(new Set(closedTrades.map((t) => t.symbol))).sort(),
     [closedTrades]
@@ -373,6 +382,50 @@ export default function AnalyticsPage() {
       computeAnalytics(filteredTrades, openTrades, startBal, config, cashNetFlows),
     [filteredTrades, openTrades, startBal, config, cashNetFlows]
   );
+
+  const mfeMaeStats = useMemo(() => {
+    if (Object.keys(mfeMaeData).length === 0) return null;
+
+    const groupKeysObj: Record<string, boolean> = {};
+    for (const t of filteredTrades) {
+      groupKeysObj[`${t.symbol}|${t.entry_price}|${t.entry_date}`] = true;
+    }
+
+    const entries: MfeMaeEntry[] = [];
+    for (const key of Object.keys(groupKeysObj)) {
+      if (mfeMaeData[key]) entries.push(mfeMaeData[key]);
+    }
+    if (entries.length === 0) return null;
+
+    const winners = entries.filter((e) => e.result_type === "WIN");
+    const losers = entries.filter((e) => e.result_type === "LOSS");
+    const withR = entries.filter((e) => e.mfe_r != null && e.mae_r != null);
+    const winnersWithR = winners.filter((e) => e.mfe_r != null && e.mae_r != null);
+    const losersWithR = losers.filter((e) => e.mfe_r != null && e.mae_r != null);
+
+    const avg = (arr: number[]) =>
+      arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+
+    const avgMaeWinR = avg(winnersWithR.map((e) => e.mae_r!));
+    const avgMfeWinR = avg(winnersWithR.map((e) => e.mfe_r!));
+    const avgMaeLossR = avg(losersWithR.map((e) => e.mae_r!));
+    const winnersWithEff = winnersWithR.filter(
+      (e) => e.efficiency != null && e.efficiency > 0
+    );
+    const avgEfficiency = avg(winnersWithEff.map((e) => e.efficiency!));
+
+    return {
+      entries,
+      withR,
+      winnersWithR,
+      losersWithR,
+      avgMaeWinR,
+      avgMfeWinR,
+      avgMaeLossR,
+      avgEfficiency,
+      totalWithData: entries.length,
+    };
+  }, [mfeMaeData, filteredTrades]);
 
   async function handleBalanceChange(val: number) {
     setStartBal(val);
@@ -776,6 +829,183 @@ export default function AnalyticsPage() {
           style={{ height: "350px" }}
         />
       </div>
+
+      {mfeMaeStats && mfeMaeStats.withR.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-xs font-bold text-neutral tracking-wider">
+            MFE / MAE — EFICIENCIA DE STOPS Y SALIDAS
+          </h3>
+          <div className="flex gap-3 overflow-x-auto pb-2">
+            <KpiCard
+              value={`${mfeMaeStats.avgMaeWinR.toFixed(2)}R`}
+              label="MAE PROM GANADORES"
+              color="#F6465D"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgMfeWinR.toFixed(2)}R`}
+              label="MFE PROM GANADORES"
+              color="#00B0BD"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgEfficiency.toFixed(1)}%`}
+              label="EFICIENCIA DE SALIDA"
+              color={mfeMaeStats.avgEfficiency >= 50 ? "#00B0BD" : "#FCD535"}
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgMaeLossR.toFixed(2)}R`}
+              label="MAE PROM PERDEDORES"
+              color="#F6465D"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.totalWithData}`}
+              label="POSICIONES ANALIZADAS"
+              color="#848E9C"
+            />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "markers",
+                  x: mfeMaeStats.winnersWithR.map((e) => e.mfe_r),
+                  y: mfeMaeStats.winnersWithR.map((e) => e.realized_r),
+                  name: "Ganadores",
+                  marker: {
+                    color: "rgba(0, 176, 189, 0.6)",
+                    size: 9,
+                    line: { color: "#00B0BD", width: 1 },
+                  },
+                  hovertemplate:
+                    "%{customdata}<br>MFE: %{x:.2f}R<br>Realizado: %{y:.2f}R<br>Efic: %{text}<extra></extra>",
+                  customdata: mfeMaeStats.winnersWithR.map((e) => e.symbol),
+                  text: mfeMaeStats.winnersWithR.map((e) =>
+                    e.efficiency != null ? `${e.efficiency.toFixed(1)}%` : "-"
+                  ),
+                },
+                {
+                  type: "scatter",
+                  mode: "markers",
+                  x: mfeMaeStats.losersWithR.map((e) => e.mfe_r),
+                  y: mfeMaeStats.losersWithR.map((e) => e.realized_r),
+                  name: "Perdedores",
+                  marker: {
+                    color: "rgba(246, 70, 93, 0.6)",
+                    size: 9,
+                    line: { color: "#F6465D", width: 1 },
+                  },
+                  hovertemplate:
+                    "%{customdata}<br>MFE: %{x:.2f}R<br>Realizado: %{y:.2f}R<extra></extra>",
+                  customdata: mfeMaeStats.losersWithR.map((e) => e.symbol),
+                },
+                {
+                  type: "scatter",
+                  mode: "lines",
+                  x: [0, Math.max(5, ...mfeMaeStats.withR.map((e) => e.mfe_r!))],
+                  y: [0, Math.max(5, ...mfeMaeStats.withR.map((e) => e.mfe_r!))],
+                  name: "100% eficiencia",
+                  line: { color: "rgba(132, 142, 156, 0.3)", width: 1.5, dash: "dash" },
+                  hoverinfo: "skip",
+                },
+              ]}
+              layout={{
+                title: { text: "MFE vs R REALIZADO" },
+                height: 380,
+                showlegend: true,
+                legend: {
+                  x: 0,
+                  xanchor: "left",
+                  y: 1,
+                  bgcolor: "rgba(24,26,32,0.6)",
+                  font: { size: 10, color: "#848E9C" },
+                  bordercolor: "transparent",
+                },
+                xaxis: { title: { text: "MFE (R)", font: { size: 11, color: "#848E9C" } }, showgrid: false },
+                yaxis: { title: { text: "R Realizado", font: { size: 11, color: "#848E9C" } } },
+                hovermode: "closest",
+              }}
+              style={{ height: "380px" }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "markers",
+                  x: mfeMaeStats.winnersWithR.map((e) => e.mae_r),
+                  y: mfeMaeStats.winnersWithR.map((e) => e.realized_r),
+                  name: "Ganadores",
+                  marker: {
+                    color: "rgba(0, 176, 189, 0.6)",
+                    size: 9,
+                    line: { color: "#00B0BD", width: 1 },
+                  },
+                  hovertemplate:
+                    "%{customdata}<br>MAE: %{x:.2f}R<br>Realizado: %{y:.2f}R<extra></extra>",
+                  customdata: mfeMaeStats.winnersWithR.map((e) => e.symbol),
+                },
+                {
+                  type: "scatter",
+                  mode: "markers",
+                  x: mfeMaeStats.losersWithR.map((e) => e.mae_r),
+                  y: mfeMaeStats.losersWithR.map((e) => e.realized_r),
+                  name: "Perdedores",
+                  marker: {
+                    color: "rgba(246, 70, 93, 0.6)",
+                    size: 9,
+                    line: { color: "#F6465D", width: 1 },
+                  },
+                  hovertemplate:
+                    "%{customdata}<br>MAE: %{x:.2f}R<br>Realizado: %{y:.2f}R<extra></extra>",
+                  customdata: mfeMaeStats.losersWithR.map((e) => e.symbol),
+                },
+              ]}
+              layout={{
+                title: { text: "MAE vs R REALIZADO" },
+                height: 380,
+                showlegend: true,
+                legend: {
+                  x: 0,
+                  xanchor: "left",
+                  y: 1,
+                  bgcolor: "rgba(24,26,32,0.6)",
+                  font: { size: 10, color: "#848E9C" },
+                  bordercolor: "transparent",
+                },
+                xaxis: { title: { text: "MAE (R)", font: { size: 11, color: "#848E9C" } }, showgrid: false },
+                yaxis: { title: { text: "R Realizado", font: { size: 11, color: "#848E9C" } } },
+                hovermode: "closest",
+              }}
+              style={{ height: "380px" }}
+            />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs text-neutral">
+            <div className="bg-card border border-border rounded-lg p-4 space-y-2">
+              <p className="font-bold text-text-main text-[11px] tracking-wider">INTERPRETACION MAE</p>
+              <p>
+                El MAE promedio de tus ganadores es{" "}
+                <span className="text-text-main font-semibold">{mfeMaeStats.avgMaeWinR.toFixed(2)}R</span>.
+                {mfeMaeStats.avgMaeWinR < 0.5
+                  ? " Tus ganadores casi nunca pasan de -0.5R en contra — tu stop podria ser mas ajustado para tomar mas tamaño con el mismo drawdown."
+                  : mfeMaeStats.avgMaeWinR < 1.0
+                    ? " Tus ganadores se bancan una excursion moderada antes de girar. Tu stop esta razonablemente calibrado."
+                    : " Tus ganadores sufren bastante excursion adversa antes de ir a favor. Podrias estar inmovilizando mas riesgo del necesario."}
+              </p>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-4 space-y-2">
+              <p className="font-bold text-text-main text-[11px] tracking-wider">INTERPRETACION MFE</p>
+              <p>
+                Eficiencia de salida:{" "}
+                <span className="text-text-main font-semibold">{mfeMaeStats.avgEfficiency.toFixed(1)}%</span>.
+                {mfeMaeStats.avgEfficiency >= 60
+                  ? " Estas capturando una buena parte del movimiento disponible."
+                  : mfeMaeStats.avgEfficiency >= 40
+                    ? " Capturas un porcentaje moderado — hay margen para optimizar tus salidas o reducir escalonamiento."
+                    : " Estas dejando mucho sobre la mesa. Revisa si tu estrategia de salida corta los trades demasiado temprano."}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {strategyKeys.length > 0 && (
         <div className="space-y-4">
