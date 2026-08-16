@@ -9,6 +9,7 @@ import {
   openNewTrade,
   closeTradeTotal,
   getOpenTrades,
+  updateTradeExPostBe,
 } from "@/lib/db/trades";
 import { curSym, fmtMoney2, getStrategyKeys } from "@/lib/calculations/helpers";
 import type { Trade, ClosedTradeWithPct } from "@/types/trade";
@@ -18,6 +19,7 @@ interface MergedTrade extends ClosedTradeWithPct {
   closes_count: number;
   child_trades: ClosedTradeWithPct[];
   child_ids: number[];
+  ex_post_be: boolean;
 }
 
 function addPnlPct(trades: Trade[]): ClosedTradeWithPct[] {
@@ -30,6 +32,10 @@ function addPnlPct(trades: Trade[]): ClosedTradeWithPct[] {
 
 function groupKey(t: Trade): string {
   return `${t.symbol}|${t.entry_price}|${t.entry_date}`;
+}
+
+function hasExPostBe(t: Trade): boolean {
+  return t.tags?._ex_post_be === "true";
 }
 
 function mergeTrades(trades: ClosedTradeWithPct[]): MergedTrade[] {
@@ -54,6 +60,7 @@ function mergeTrades(trades: ClosedTradeWithPct[]): MergedTrade[] {
         closes_count: 1,
         child_trades: group,
         child_ids: [group[0].id],
+        ex_post_be: hasExPostBe(group[0]),
       };
     }
 
@@ -97,6 +104,7 @@ function mergeTrades(trades: ClosedTradeWithPct[]): MergedTrade[] {
       closes_count: group.length,
       child_trades: sorted,
       child_ids: group.map((t) => t.id),
+      ex_post_be: group.some(hasExPostBe),
     };
   });
 }
@@ -146,10 +154,60 @@ export default function HistorialPage() {
     () => getClosedTrades(user!)
   );
 
-  const mergedTrades = useMemo(
+  const allMerged = useMemo(
     () => assignVisualIds(mergeTrades(addPnlPct(rawTrades))),
     [rawTrades]
   );
+
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterSymbol, setFilterSymbol] = useState("");
+  const [filterSide, setFilterSide] = useState("");
+  const [filterStrategy, setFilterStrategy] = useState<Record<string, string>>({});
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const symbols = useMemo(
+    () => Array.from(new Set(allMerged.map((t) => t.symbol))).sort(),
+    [allMerged]
+  );
+
+  const filteredTrades = useMemo(() => {
+    let trades = allMerged;
+    if (filterFrom) {
+      const from = new Date(filterFrom).getTime();
+      trades = trades.filter(
+        (t) => new Date(t.exit_date || "").getTime() >= from
+      );
+    }
+    if (filterTo) {
+      const to = new Date(filterTo).getTime() + 86400000;
+      trades = trades.filter(
+        (t) => new Date(t.exit_date || "").getTime() < to
+      );
+    }
+    if (filterSymbol) {
+      trades = trades.filter((t) => t.symbol === filterSymbol);
+    }
+    if (filterSide) {
+      trades = trades.filter((t) => t.side === filterSide);
+    }
+    for (const [k, v] of Object.entries(filterStrategy)) {
+      if (v) trades = trades.filter((t) => t.tags?.[k] === v);
+    }
+    return trades;
+  }, [allMerged, filterFrom, filterTo, filterSymbol, filterSide, filterStrategy]);
+
+  const hasActiveFilters =
+    !!filterFrom || !!filterTo || !!filterSymbol || !!filterSide ||
+    Object.values(filterStrategy).some(Boolean);
+
+  function clearFilters() {
+    setFilterFrom("");
+    setFilterTo("");
+    setFilterSymbol("");
+    setFilterSide("");
+    setFilterStrategy({});
+  }
 
   type SortKey =
     | "visual_id"
@@ -185,7 +243,7 @@ export default function HistorialPage() {
     setPage(0);
   }
 
-  const trades = [...mergedTrades].sort((a, b) => {
+  const trades = [...filteredTrades].sort((a, b) => {
     const key = sortKey;
     let aVal = a[key];
     let bVal = b[key];
@@ -225,6 +283,15 @@ export default function HistorialPage() {
   function handleChildClick(childId: number) {
     const isSelected = selectedIds.length === 1 && selectedIds[0] === childId;
     setSelectedIds(isSelected ? [] : [childId]);
+  }
+
+  async function handleToggleExPostBe(t: MergedTrade, e: React.MouseEvent) {
+    e.stopPropagation();
+    const newVal = !t.ex_post_be;
+    for (const id of t.child_ids) {
+      await updateTradeExPostBe(id, newVal);
+    }
+    mutateTrades();
   }
 
   async function handleDeleteSelected() {
@@ -341,14 +408,16 @@ export default function HistorialPage() {
 
   const totalRawTrades = rawTrades.length;
 
-  const INPUT =
-    "bg-bg border border-border rounded px-3 py-2 text-text-main focus:border-accent outline-none transition text-sm";
+  const INPUT_CLS =
+    "bg-bg border border-border rounded px-3 py-1.5 text-text-main text-sm focus:border-accent outline-none";
 
   function resultColor(rt?: string) {
     if (rt === "WIN") return "text-accent";
     if (rt === "LOSS") return "text-negative";
     return "text-neutral";
   }
+
+  const colCount = 14 + strategyKeys.length;
 
   return (
     <div className="space-y-4">
@@ -378,15 +447,110 @@ export default function HistorialPage() {
             disabled={importing}
           />
         </label>
-        {mergedTrades.length !== totalRawTrades && (
+        <button
+          onClick={() => setFiltersOpen((o) => !o)}
+          className={`px-3 py-2 text-xs font-bold rounded border transition ${
+            hasActiveFilters
+              ? "border-accent text-accent bg-accent/10"
+              : "border-border text-neutral hover:text-text-main"
+          }`}
+        >
+          {filtersOpen ? "OCULTAR FILTROS" : "FILTROS"}
+          {hasActiveFilters && ` (${filteredTrades.length}/${allMerged.length})`}
+        </button>
+        {hasActiveFilters && (
+          <button
+            onClick={clearFilters}
+            className="text-xs text-negative font-bold hover:text-negative/80 transition"
+          >
+            LIMPIAR
+          </button>
+        )}
+        {allMerged.length !== totalRawTrades && !hasActiveFilters && (
           <span className="text-xs text-neutral">
-            {mergedTrades.length} operaciones ({totalRawTrades} registros)
+            {allMerged.length} operaciones ({totalRawTrades} registros)
           </span>
         )}
         {msg && (
           <span className="text-sm font-semibold text-accent">{msg}</span>
         )}
       </div>
+
+      {/* Filters */}
+      {filtersOpen && (
+        <div className="flex flex-wrap gap-3 p-4 bg-card rounded border border-border">
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">DESDE</label>
+            <input
+              type="date"
+              value={filterFrom}
+              onChange={(e) => { setFilterFrom(e.target.value); setPage(0); }}
+              className={`w-36 ${INPUT_CLS}`}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">HASTA</label>
+            <input
+              type="date"
+              value={filterTo}
+              onChange={(e) => { setFilterTo(e.target.value); setPage(0); }}
+              className={`w-36 ${INPUT_CLS}`}
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">ACTIVO</label>
+            <select
+              value={filterSymbol}
+              onChange={(e) => { setFilterSymbol(e.target.value); setPage(0); }}
+              className={`w-32 ${INPUT_CLS}`}
+            >
+              <option value="">Todos</option>
+              {symbols.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] text-neutral font-bold mb-1">SIDE</label>
+            <select
+              value={filterSide}
+              onChange={(e) => { setFilterSide(e.target.value); setPage(0); }}
+              className={`w-28 ${INPUT_CLS}`}
+            >
+              <option value="">Todos</option>
+              <option value="LONG">LONG</option>
+              <option value="SHORT">SHORT</option>
+            </select>
+          </div>
+          {strategyKeys.map((k) => {
+            const opts = typeof config[k] === "string"
+              ? (config[k] as string).split(",").map((v: string) => v.trim()).filter(Boolean)
+              : Array.isArray(config[k])
+                ? (config[k] as string[])
+                : [];
+            return (
+              <div key={k}>
+                <label className="block text-[10px] text-neutral font-bold mb-1">
+                  {k.toUpperCase()}
+                </label>
+                <select
+                  value={filterStrategy[k] || ""}
+                  onChange={(e) => {
+                    setFilterStrategy((prev) => ({ ...prev, [k]: e.target.value }));
+                    setPage(0);
+                  }}
+                  className={`w-32 ${INPUT_CLS}`}
+                >
+                  <option value="">Todos</option>
+                  {opts.map((v: string) => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-card border border-border rounded-lg overflow-hidden shadow-xl">
@@ -442,13 +606,16 @@ export default function HistorialPage() {
                     </span>
                   </th>
                 ))}
+                <th className="px-2 py-2.5 text-center text-neutral whitespace-nowrap">
+                  Ex-post BE
+                </th>
               </tr>
             </thead>
             <tbody>
               {pagedTrades.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={13 + strategyKeys.length}
+                    colSpan={colCount}
                     className="px-3 py-8 text-center text-neutral"
                   >
                     Sin trades cerrados
@@ -463,6 +630,7 @@ export default function HistorialPage() {
                     t.child_ids.some((id) => selectedIds.includes(id));
                   const pnl = t.pnl ?? 0;
                   const pnlPct = t.pnl_pct;
+                  const isBe = t.result_type === "BE";
 
                   const mainRow = (
                     <tr
@@ -536,6 +704,18 @@ export default function HistorialPage() {
                         {pnlPct.toFixed(2)}%
                       </td>
                       <td className="px-3 py-2">{t.exit_date || ""}</td>
+                      <td className="px-2 py-2 text-center">
+                        {isBe && (
+                          <input
+                            type="checkbox"
+                            checked={t.ex_post_be}
+                            onClick={(e) => handleToggleExPostBe(t, e)}
+                            onChange={() => {}}
+                            className="w-4 h-4 accent-accent cursor-pointer"
+                            title="El precio fue al nivel de stop post-cierre"
+                          />
+                        )}
+                      </td>
                     </tr>
                   );
 
@@ -626,6 +806,7 @@ export default function HistorialPage() {
                         <td className="px-3 py-1.5 text-xs text-neutral">
                           {child.exit_date || ""}
                         </td>
+                        <td className="px-2 py-1.5"></td>
                       </tr>
                     );
                   });
@@ -649,7 +830,7 @@ export default function HistorialPage() {
                 setPageSize(Number(e.target.value));
                 setPage(0);
               }}
-              className={INPUT}
+              className={INPUT_CLS}
             >
               {[10, 25, 50, 100].map((n) => (
                 <option key={n} value={n}>

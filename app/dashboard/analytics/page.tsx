@@ -408,22 +408,62 @@ export default function AnalyticsPage() {
 
     const avgMaeWinR = avg(winnersWithR.map((e) => e.mae_r!));
     const avgMfeWinR = avg(winnersWithR.map((e) => e.mfe_r!));
-    const avgMaeLossR = avg(losersWithR.map((e) => e.mae_r!));
+    const avgMaeWinPct = avg(winners.map((e) => e.mae_pct));
+    const avgMfeWinPct = avg(winners.map((e) => e.mfe_pct));
     const winnersWithEff = winnersWithR.filter(
       (e) => e.efficiency != null && e.efficiency > 0
     );
     const avgEfficiency = avg(winnersWithEff.map((e) => e.efficiency!));
 
+    const avgMaeLossR = avg(losersWithR.map((e) => e.mae_r!));
+    const avgMfeLossR = avg(losersWithR.map((e) => e.mfe_r!));
+    const avgMaeLossPct = avg(losers.map((e) => e.mae_pct));
+    const avgMfeLossPct = avg(losers.map((e) => e.mfe_pct));
+    const losersWithEff = losersWithR.filter(
+      (e) => e.efficiency != null
+    );
+    const avgLossEfficiency = avg(losersWithEff.map((e) => e.efficiency!));
+
+    const positionGroups: Record<string, typeof filteredTrades> = {};
+    for (const t of filteredTrades) {
+      const key = `${t.symbol}|${t.entry_price}|${t.entry_date}`;
+      if (!positionGroups[key]) positionGroups[key] = [];
+      positionGroups[key].push(t);
+    }
+    let totalBe = 0;
+    let beWithExPost = 0;
+    for (const group of Object.values(positionGroups)) {
+      const totalPnl = group.reduce((s, t) => s + (t.pnl ?? 0), 0);
+      if (Math.abs(totalPnl) < 0.01) {
+        totalBe++;
+        if (group.some((t) => t.tags?._ex_post_be === "true")) beWithExPost++;
+      }
+    }
+    const beWithoutExPost = totalBe - beWithExPost;
+    const beEfficiency = totalBe > 0 ? (beWithExPost / totalBe) * 100 : 0;
+
     return {
       entries,
       withR,
+      winners,
+      losers,
       winnersWithR,
       losersWithR,
       avgMaeWinR,
       avgMfeWinR,
-      avgMaeLossR,
+      avgMaeWinPct,
+      avgMfeWinPct,
       avgEfficiency,
+      avgMaeLossR,
+      avgMfeLossR,
+      avgMaeLossPct,
+      avgMfeLossPct,
+      avgLossEfficiency,
       totalWithData: entries.length,
+      totalBe,
+      beWithExPost,
+      beWithoutExPost,
+      beEfficiency,
     };
   }, [mfeMaeData, filteredTrades]);
 
@@ -833,17 +873,27 @@ export default function AnalyticsPage() {
       {mfeMaeStats && mfeMaeStats.withR.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-xs font-bold text-neutral tracking-wider">
-            MFE / MAE — EFICIENCIA DE STOPS Y SALIDAS
+            MFE / MAE — GANADORES ({mfeMaeStats.winners.length})
           </h3>
           <div className="flex gap-3 overflow-x-auto pb-2">
             <KpiCard
               value={`${mfeMaeStats.avgMaeWinR.toFixed(2)}R`}
-              label="MAE PROM GANADORES"
+              label="MAE PROM (R)"
+              color="#F6465D"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgMaeWinPct.toFixed(2)}%`}
+              label="MAE PROM (%)"
               color="#F6465D"
             />
             <KpiCard
               value={`${mfeMaeStats.avgMfeWinR.toFixed(2)}R`}
-              label="MFE PROM GANADORES"
+              label="MFE PROM (R)"
+              color="#00B0BD"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgMfeWinPct.toFixed(2)}%`}
+              label="MFE PROM (%)"
               color="#00B0BD"
             />
             <KpiCard
@@ -851,10 +901,31 @@ export default function AnalyticsPage() {
               label="EFICIENCIA DE SALIDA"
               color={mfeMaeStats.avgEfficiency >= 50 ? "#00B0BD" : "#FCD535"}
             />
+          </div>
+
+          <h3 className="text-xs font-bold text-neutral tracking-wider">
+            MFE / MAE — PERDEDORES ({mfeMaeStats.losers.length})
+          </h3>
+          <div className="flex gap-3 overflow-x-auto pb-2">
             <KpiCard
               value={`${mfeMaeStats.avgMaeLossR.toFixed(2)}R`}
-              label="MAE PROM PERDEDORES"
+              label="MAE PROM (R)"
               color="#F6465D"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgMaeLossPct.toFixed(2)}%`}
+              label="MAE PROM (%)"
+              color="#F6465D"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgMfeLossR.toFixed(2)}R`}
+              label="MFE PROM (R)"
+              color="#FCD535"
+            />
+            <KpiCard
+              value={`${mfeMaeStats.avgMfeLossPct.toFixed(2)}%`}
+              label="MFE PROM (%)"
+              color="#FCD535"
             />
             <KpiCard
               value={`${mfeMaeStats.totalWithData}`}
@@ -862,6 +933,37 @@ export default function AnalyticsPage() {
               color="#848E9C"
             />
           </div>
+
+          {mfeMaeStats.totalBe > 0 && (
+            <>
+              <h3 className="text-xs font-bold text-neutral tracking-wider">
+                EFICIENCIA BREAK EVEN
+              </h3>
+              <div className="flex gap-3 overflow-x-auto pb-2">
+                <KpiCard
+                  value={`${mfeMaeStats.totalBe}`}
+                  label="TRADES BE TOTAL"
+                  color="#848E9C"
+                />
+                <KpiCard
+                  value={`${mfeMaeStats.beWithExPost}`}
+                  label="STOP CORRECTO"
+                  color="#00B0BD"
+                />
+                <KpiCard
+                  value={`${mfeMaeStats.beWithoutExPost}`}
+                  label="FUE AL TARGET"
+                  color="#FCD535"
+                />
+                <KpiCard
+                  value={`${mfeMaeStats.beEfficiency.toFixed(1)}%`}
+                  label="EFICIENCIA BE"
+                  color={mfeMaeStats.beEfficiency >= 50 ? "#00B0BD" : "#FCD535"}
+                />
+              </div>
+            </>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <PlotlyChart
               data={[
@@ -983,27 +1085,56 @@ export default function AnalyticsPage() {
               <p className="font-bold text-text-main text-[11px] tracking-wider">INTERPRETACION MAE</p>
               <p>
                 El MAE promedio de tus ganadores es{" "}
-                <span className="text-text-main font-semibold">{mfeMaeStats.avgMaeWinR.toFixed(2)}R</span>.
+                <span className="text-text-main font-semibold">{mfeMaeStats.avgMaeWinR.toFixed(2)}R</span>
+                {" "}({mfeMaeStats.avgMaeWinPct.toFixed(2)}%).
                 {mfeMaeStats.avgMaeWinR < 0.5
                   ? " Tus ganadores casi nunca pasan de -0.5R en contra — tu stop podria ser mas ajustado para tomar mas tamaño con el mismo drawdown."
                   : mfeMaeStats.avgMaeWinR < 1.0
                     ? " Tus ganadores se bancan una excursion moderada antes de girar. Tu stop esta razonablemente calibrado."
                     : " Tus ganadores sufren bastante excursion adversa antes de ir a favor. Podrias estar inmovilizando mas riesgo del necesario."}
+                {" "}El MAE promedio de tus perdedores es{" "}
+                <span className="text-text-main font-semibold">{mfeMaeStats.avgMaeLossR.toFixed(2)}R</span>
+                {" "}({mfeMaeStats.avgMaeLossPct.toFixed(2)}%).
               </p>
             </div>
             <div className="bg-card border border-border rounded-lg p-4 space-y-2">
               <p className="font-bold text-text-main text-[11px] tracking-wider">INTERPRETACION MFE</p>
               <p>
-                Eficiencia de salida:{" "}
+                Eficiencia de salida ganadores:{" "}
                 <span className="text-text-main font-semibold">{mfeMaeStats.avgEfficiency.toFixed(1)}%</span>.
                 {mfeMaeStats.avgEfficiency >= 60
                   ? " Estas capturando una buena parte del movimiento disponible."
                   : mfeMaeStats.avgEfficiency >= 40
                     ? " Capturas un porcentaje moderado — hay margen para optimizar tus salidas o reducir escalonamiento."
                     : " Estas dejando mucho sobre la mesa. Revisa si tu estrategia de salida corta los trades demasiado temprano."}
+                {" "}El MFE promedio de tus perdedores es{" "}
+                <span className="text-text-main font-semibold">{mfeMaeStats.avgMfeLossR.toFixed(2)}R</span>
+                {" "}({mfeMaeStats.avgMfeLossPct.toFixed(2)}%)
+                {mfeMaeStats.avgMfeLossR >= 1.0
+                  ? " — tus perdedores llegaron a estar en ganancia significativa antes de revertir. Considera ajustar trailing stops."
+                  : " — tus perdedores no llegaron lejos a favor antes de revertir."}
               </p>
             </div>
           </div>
+          {mfeMaeStats.totalBe > 0 && (
+            <div className="bg-card border border-border rounded-lg p-4 space-y-2 text-xs text-neutral">
+              <p className="font-bold text-text-main text-[11px] tracking-wider">INTERPRETACION BREAK EVEN</p>
+              <p>
+                De {mfeMaeStats.totalBe} operaciones BE,{" "}
+                <span className="text-accent font-semibold">{mfeMaeStats.beWithExPost}</span> fueron al nivel de stop
+                post-cierre (stop correcto) y{" "}
+                <span className="text-[#FCD535] font-semibold">{mfeMaeStats.beWithoutExPost}</span> fueron al target
+                (hubieses ganado de mantener).
+                {" "}Eficiencia BE:{" "}
+                <span className="text-text-main font-semibold">{mfeMaeStats.beEfficiency.toFixed(1)}%</span>.
+                {mfeMaeStats.beEfficiency >= 60
+                  ? " La mayoria de tus BE estaban bien puestos — el stop en BE te protegio correctamente."
+                  : mfeMaeStats.beEfficiency >= 30
+                    ? " Un mix equilibrado — parte de tus BE te protegieron y parte fueron al target."
+                    : " La mayoria de tus BE fueron al target — estas cortando trades ganadores prematuramente al mover el stop a BE."}
+              </p>
+            </div>
+          )}
         </div>
       )}
 

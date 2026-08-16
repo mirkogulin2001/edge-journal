@@ -176,6 +176,31 @@ export async function deleteTrade(tradeId: number): Promise<boolean> {
   return !error;
 }
 
+export async function updateTradeExPostBe(
+  tradeId: number,
+  value: boolean
+): Promise<boolean> {
+  const { data, error } = await getSupabase()
+    .from("trades")
+    .select("tags")
+    .eq("id", tradeId)
+    .single();
+  if (error || !data) return false;
+
+  const tags = (data.tags as Record<string, string>) || {};
+  if (value) {
+    tags._ex_post_be = "true";
+  } else {
+    delete tags._ex_post_be;
+  }
+
+  const { error: updateErr } = await getSupabase()
+    .from("trades")
+    .update({ tags })
+    .eq("id", tradeId);
+  return !updateErr;
+}
+
 export async function deleteAllClosedTrades(
   username: string
 ): Promise<boolean> {
