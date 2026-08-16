@@ -29,7 +29,7 @@ function addPnlPct(trades: Trade[]): ClosedTradeWithPct[] {
 }
 
 function groupKey(t: Trade): string {
-  return `${t.symbol}|${t.side}|${t.entry_price}|${t.entry_date}|${t.initial_stop_loss}`;
+  return `${t.symbol}|${t.entry_price}|${t.entry_date}`;
 }
 
 function mergeTrades(trades: ClosedTradeWithPct[]): MergedTrade[] {
