@@ -433,8 +433,14 @@ export default function AnalyticsPage() {
     let totalBe = 0;
     let beWithExPost = 0;
     for (const group of Object.values(positionGroups)) {
-      const totalPnl = group.reduce((s, t) => s + (t.pnl ?? 0), 0);
-      if (Math.abs(totalPnl) < 0.01) {
+      let isBe: boolean;
+      if (group.length === 1) {
+        isBe = group[0].result_type === "BE";
+      } else {
+        const totalPnl = group.reduce((s, t) => s + (t.pnl ?? 0), 0);
+        isBe = !(totalPnl > 0.01) && !(totalPnl < -0.01);
+      }
+      if (isBe) {
         totalBe++;
         if (group.some((t) => t.tags?._ex_post_be === "true")) beWithExPost++;
       }
