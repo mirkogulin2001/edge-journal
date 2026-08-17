@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, useRef } from "react";
 import { useSession } from "@/hooks/useSession";
 import { getClosedTrades } from "@/lib/db/trades";
-import { fmtPct } from "@/lib/calculations/helpers";
+import { fmtPct, curSym, fmtMoney2 } from "@/lib/calculations/helpers";
 import type { Trade } from "@/types/trade";
 import useSWR from "swr";
 import KpiCard from "@/components/ui/KpiCard";
@@ -171,6 +171,9 @@ const BATCH_DELAY_MS = 40;
 export default function MonteCarloPage() {
   const { session } = useSession();
   const user = session?.user;
+  const config = session?.config || {};
+  const initialBalance = (config.initial_balance as number) || 10000;
+  const sym = curSym(config);
 
   const { data: closedTrades = [] } = useSWR(
     user ? `trades-closed-${user}` : null,
@@ -192,6 +195,11 @@ export default function MonteCarloPage() {
     const suggested12m = Math.max(50, tradesPerMonth * 12);
     return { tradesPerMonth, suggested3m, suggested6m, suggested12m };
   }, [closedTrades]);
+
+  const accountBalance = useMemo(() => {
+    const totalPnl = closedTrades.reduce((s, t) => s + (t.pnl ?? 0), 0);
+    return Math.round((initialBalance + totalPnl) * 100) / 100;
+  }, [closedTrades, initialBalance]);
 
   const [nSims, setNSims] = useState(500);
   const [kellyFrac, setKellyFrac] = useState(0.5);
@@ -418,6 +426,11 @@ export default function MonteCarloPage() {
               value={fmtPct(s.fUsed * 100)}
               label={`RIESGO (x${kellyFrac})`}
               color="#00B0BD"
+            />
+            <KpiCard
+              value={fmtMoney2(Math.round(s.fUsed * accountBalance * 100) / 100, sym)}
+              label={`RIESGO/TRADE (${sym})`}
+              color="#FCD535"
             />
             <KpiCard
               value={fmtPct(stats.meanRet, 1)}

@@ -345,13 +345,22 @@ export default function HistorialPage() {
     if (t.closes_count > 1) {
       toggleExpand(t);
     } else {
-      startEdit(t);
+      const alreadySelected = selectedIds.length === 1 && selectedIds[0] === t.id;
+      setSelectedIds(alreadySelected ? [] : [t.id]);
     }
   }
 
   function handleChildClick(child: ClosedTradeWithPct) {
     if (editingId != null) return;
-    startEdit(child);
+    const alreadySelected = selectedIds.length === 1 && selectedIds[0] === child.id;
+    setSelectedIds(alreadySelected ? [] : [child.id]);
+  }
+
+  function handleEditSelected() {
+    if (selectedIds.length !== 1) return;
+    const id = selectedIds[0];
+    const found = rawTrades.find((t) => t.id === id);
+    if (found) startEdit(found as ClosedTradeWithPct);
   }
 
   async function handleToggleExPostBe(t: MergedTrade, e: React.MouseEvent) {
@@ -478,22 +487,31 @@ export default function HistorialPage() {
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-3">
         <button
+          onClick={handleEditSelected}
+          disabled={selectedIds.length !== 1 || editingId != null}
+          className="px-4 py-2 border border-accent rounded text-sm font-bold text-accent hover:bg-accent/10 transition disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          EDITAR
+        </button>
+        <button
           onClick={async () => {
-            if (editingId == null) return;
+            const idToDel = editingId ?? (selectedIds.length === 1 ? selectedIds[0] : null);
+            if (idToDel == null) return;
             if (!confirm("¿Eliminar este trade del historial?")) return;
-            const ok = await deleteTrade(editingId);
+            const ok = await deleteTrade(idToDel);
             if (ok) {
               setMsg("Trade eliminado.");
               setEditingId(null);
+              setSelectedIds([]);
               mutateTrades();
             } else {
               setMsg("Error al eliminar");
             }
           }}
-          disabled={editingId == null}
+          disabled={editingId == null && selectedIds.length !== 1}
           className="px-4 py-2 border border-border rounded text-sm font-bold text-text-main hover:border-accent transition disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          BORRAR TRADE
+          BORRAR
         </button>
         <button
           onClick={handleDeleteAll}
@@ -818,9 +836,11 @@ export default function HistorialPage() {
                       key={`main-${t.id}`}
                       onClick={() => handleRowClick(t)}
                       className={`cursor-pointer transition-colors ${
-                        i % 2 === 1
-                          ? "bg-row-odd hover:bg-neutral/5"
-                          : "hover:bg-neutral/5"
+                        selectedIds.includes(t.id)
+                          ? "bg-accent/10"
+                          : i % 2 === 1
+                            ? "bg-row-odd hover:bg-neutral/5"
+                            : "hover:bg-neutral/5"
                       }`}
                     >
                       <td className="px-3 py-2 text-center text-neutral">
@@ -1035,7 +1055,11 @@ export default function HistorialPage() {
                           e.stopPropagation();
                           handleChildClick(child);
                         }}
-                        className="cursor-pointer transition-colors border-l-2 border-accent/30 bg-bg/50 hover:bg-neutral/5"
+                        className={`cursor-pointer transition-colors border-l-2 border-accent/30 ${
+                          selectedIds.includes(child.id)
+                            ? "bg-accent/15"
+                            : "bg-bg/50 hover:bg-neutral/5"
+                        }`}
                       >
                         <td className="px-3 py-1.5 text-center text-neutral text-[10px]">
                           └
