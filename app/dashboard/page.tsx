@@ -72,9 +72,22 @@ export default function DashboardHomePage() {
     { refreshInterval: 30000 }
   );
 
-  // Computed values
+  // Fetch real account balance from performance API
+  const { data: perfData } = useSWR(
+    user ? `perf-balance-${user}-${initialBalance}` : null,
+    () =>
+      fetch(
+        `/api/performance?user=${user}&balance=${initialBalance}&benchmark=SPY&period=ALL`
+      ).then((r) => r.json())
+  );
+
   const totalRealizedPnl = closedTrades.reduce((s, t) => s + (t.pnl ?? 0), 0);
-  const accountBalance = initialBalance + totalRealizedPnl;
+  const accountBalance = useMemo(() => {
+    if (perfData?.rows?.length > 0) {
+      return perfData.rows[perfData.rows.length - 1].total_value as number;
+    }
+    return initialBalance + totalRealizedPnl;
+  }, [perfData, initialBalance, totalRealizedPnl]);
 
   const pnlToday = closedTrades
     .filter((t) => isToday(t.exit_date))

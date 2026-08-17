@@ -771,110 +771,121 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <PlotlyChart
-          data={[
-            {
-              type: "scatter",
-              mode: "lines",
-              x: a.tradeNums,
-              y: a.cumWinRate,
-              name: "Win Rate",
-              line: { color: "#00B0BD", width: 2, shape: "spline", smoothing: 1.0 },
-            },
-            {
-              type: "scatter",
-              mode: "lines",
-              x: a.tradeNums,
-              y: a.cumLossRate,
-              name: "Loss Rate",
-              line: { color: "#F6465D", width: 2, shape: "spline", smoothing: 1.0 },
-            },
-            {
-              type: "scatter",
-              mode: "lines",
-              x: a.tradeNums,
-              y: a.cumBeRate,
-              name: "BE Rate",
-              line: { color: "#848E9C", width: 2, shape: "spline", smoothing: 1.0 },
-            },
-          ]}
-          layout={{
-            title: { text: "EVOLUCION TASAS (%)" },
-            height: 350,
-            yaxis: { ticksuffix: "%" },
-            xaxis: { showgrid: false },
-            hovermode: "x unified",
-            showlegend: true,
-            legend: {
-              orientation: "h",
-              yanchor: "bottom",
-              y: 1.02,
-              xanchor: "right",
-              x: 1,
-              font: { size: 11, color: "#848E9C" },
-            },
-          }}
-          style={{ height: "350px" }}
-        />
-        <PlotlyChart
-          data={[
-            {
-              type: "scatter",
-              mode: "lines",
-              x: a.tradeNums,
-              y: a.cumRatio,
-              name: "Ratio R/B",
-              line: { color: "#FCD535", width: 2, shape: "spline", smoothing: 1.0 },
-              fill: "tozeroy",
-              fillcolor: "rgba(252, 213, 53, 0.06)",
-            },
-          ]}
-          layout={{
-            title: { text: "EVOLUCION RATIO R/B" },
-            height: 350,
-            showlegend: false,
-            hovermode: "x unified",
-            xaxis: { showgrid: false },
-          }}
-          style={{ height: "350px" }}
-        />
-        <PlotlyChart
-          data={[
-            {
-              type: "scatter",
-              mode: "lines",
-              x: a.tradeNums,
-              y: a.cumEdge,
-              name: "Esperanza",
-              line: { color: "#00B0BD", width: 2.5, shape: "spline", smoothing: 1.0 },
-              fill: "tozeroy",
-              fillcolor: "rgba(0, 176, 189, 0.08)",
-              hovertemplate: "Trade %{x}<br>Edge: %{y:.2f}R<extra></extra>",
-            },
-          ]}
-          layout={{
-            title: { text: "EVOLUCION DEL EDGE (R)" },
-            height: 350,
-            showlegend: false,
-            hovermode: "x unified",
-            xaxis: { showgrid: false },
-            yaxis: { ticksuffix: "R" },
-            shapes: [
-              {
-                type: "line",
-                y0: 0,
-                y1: 0,
-                x0: 0,
-                x1: 1,
-                xref: "paper",
-                line: { color: "#F6465D", width: 1.5, dash: "dash" },
-              },
-            ],
-          }}
-          style={{ height: "350px" }}
-        />
-      </div>
+      {a.tradeNums.length >= 20 && (() => {
+        const S = 19;
+        const nums = a.tradeNums.slice(S);
+        const wr = a.cumWinRate.slice(S);
+        const lr = a.cumLossRate.slice(S);
+        const br = a.cumBeRate.slice(S);
+        const ratio = a.cumRatio.slice(S);
+        const edge = a.cumEdge.slice(S);
+        return (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "lines",
+                  x: nums,
+                  y: wr,
+                  name: "Win Rate",
+                  line: { color: "#00B0BD", width: 2, shape: "spline", smoothing: 1.0 },
+                },
+                {
+                  type: "scatter",
+                  mode: "lines",
+                  x: nums,
+                  y: lr,
+                  name: "Loss Rate",
+                  line: { color: "#F6465D", width: 2, shape: "spline", smoothing: 1.0 },
+                },
+                {
+                  type: "scatter",
+                  mode: "lines",
+                  x: nums,
+                  y: br,
+                  name: "BE Rate",
+                  line: { color: "#848E9C", width: 2, shape: "spline", smoothing: 1.0 },
+                },
+              ]}
+              layout={{
+                title: { text: "EVOLUCION TASAS (%)" },
+                height: 350,
+                yaxis: { ticksuffix: "%" },
+                xaxis: { showgrid: false },
+                hovermode: "x unified",
+                showlegend: true,
+                legend: {
+                  orientation: "h",
+                  yanchor: "bottom",
+                  y: 1.02,
+                  xanchor: "right",
+                  x: 1,
+                  font: { size: 11, color: "#848E9C" },
+                },
+              }}
+              style={{ height: "350px" }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "lines",
+                  x: nums,
+                  y: ratio,
+                  name: "Ratio R/B",
+                  line: { color: "#FCD535", width: 2, shape: "spline", smoothing: 1.0 },
+                  fill: "tozeroy",
+                  fillcolor: "rgba(252, 213, 53, 0.06)",
+                },
+              ]}
+              layout={{
+                title: { text: "EVOLUCION RATIO R/B" },
+                height: 350,
+                showlegend: false,
+                hovermode: "x unified",
+                xaxis: { showgrid: false },
+              }}
+              style={{ height: "350px" }}
+            />
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "lines",
+                  x: nums,
+                  y: edge,
+                  name: "Esperanza",
+                  line: { color: "#00B0BD", width: 2.5, shape: "spline", smoothing: 1.0 },
+                  fill: "tozeroy",
+                  fillcolor: "rgba(0, 176, 189, 0.08)",
+                  hovertemplate: "Trade %{x}<br>Edge: %{y:.2f}R<extra></extra>",
+                },
+              ]}
+              layout={{
+                title: { text: "EVOLUCION DEL EDGE (R)" },
+                height: 350,
+                showlegend: false,
+                hovermode: "x unified",
+                xaxis: { showgrid: false },
+                yaxis: { ticksuffix: "R" },
+                shapes: [
+                  {
+                    type: "line",
+                    y0: 0,
+                    y1: 0,
+                    x0: 0,
+                    x1: 1,
+                    xref: "paper",
+                    line: { color: "#F6465D", width: 1.5, dash: "dash" },
+                  },
+                ],
+              }}
+              style={{ height: "350px" }}
+            />
+          </div>
+        );
+      })()}
 
       {mfeMaeStats && mfeMaeStats.withR.length > 0 && (
         <div className="space-y-4">
