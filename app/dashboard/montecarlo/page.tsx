@@ -196,16 +196,30 @@ export default function MonteCarloPage() {
     return { tradesPerMonth, suggested3m, suggested6m, suggested12m };
   }, [closedTrades]);
 
+  const { data: perfData } = useSWR(
+    user ? `perf-balance-${user}-${initialBalance}` : null,
+    () =>
+      fetch(
+        `/api/performance?user=${user}&balance=${initialBalance}&benchmark=SPY&period=ALL`
+      ).then((r) => r.json())
+  );
+
   const accountBalance = useMemo(() => {
+    if (perfData?.rows?.length > 0) {
+      return perfData.rows[perfData.rows.length - 1].total_value as number;
+    }
     const totalPnl = closedTrades.reduce((s, t) => s + (t.pnl ?? 0), 0);
     return Math.round((initialBalance + totalPnl) * 100) / 100;
-  }, [closedTrades, initialBalance]);
+  }, [perfData, closedTrades, initialBalance]);
 
   const [nSims, setNSims] = useState(500);
   const [kellyFrac, setKellyFrac] = useState(0.5);
   const [tradesPerSim, setTradesPerSim] = useState(100);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<MCProgress | null>(null);
+
+  const [calcEntry, setCalcEntry] = useState("");
+  const [calcStop, setCalcStop] = useState("");
 
   const runIdRef = useRef(0);
 
@@ -457,6 +471,89 @@ export default function MonteCarloPage() {
               label="RIESGO DE RUINA"
               color="#F6465D"
             />
+          </div>
+
+          {/* Position calculator */}
+          <div className="bg-card border border-border rounded-lg p-4">
+            <h3 className="text-xs font-bold text-neutral tracking-wider mb-3">
+              CALCULADOR DE POSICIÓN
+            </h3>
+            <div className="flex flex-wrap items-end gap-4">
+              <div>
+                <label className="block text-[10px] text-neutral font-bold mb-1">
+                  PRECIO ENTRADA
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={calcEntry}
+                  onChange={(e) => setCalcEntry(e.target.value)}
+                  placeholder="0.00"
+                  className="w-32 bg-bg border border-border rounded px-3 py-2 text-text-main text-sm focus:border-accent outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] text-neutral font-bold mb-1">
+                  STOP LOSS
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={calcStop}
+                  onChange={(e) => setCalcStop(e.target.value)}
+                  placeholder="0.00"
+                  className="w-32 bg-bg border border-border rounded px-3 py-2 text-text-main text-sm focus:border-accent outline-none"
+                />
+              </div>
+              {(() => {
+                const entry = parseFloat(calcEntry);
+                const stop = parseFloat(calcStop);
+                const riskPerTrade = s.fUsed * accountBalance;
+                const riskPerShare =
+                  !isNaN(entry) && !isNaN(stop) && entry > 0 && stop > 0
+                    ? Math.abs(entry - stop)
+                    : 0;
+                const shares =
+                  riskPerShare > 0 ? Math.floor(riskPerTrade / riskPerShare) : 0;
+                const totalCost = shares * (entry || 0);
+                return (
+                  <>
+                    <div className="bg-bg border border-border rounded px-4 py-2 text-center min-w-[120px]">
+                      <p className="text-[10px] text-neutral font-bold mb-0.5">
+                        RIESGO/TRADE
+                      </p>
+                      <p className="text-sm font-bold text-[#FCD535]">
+                        {fmtMoney2(
+                          Math.round(riskPerTrade * 100) / 100,
+                          sym
+                        )}
+                      </p>
+                    </div>
+                    <div className="bg-bg border border-border rounded px-4 py-2 text-center min-w-[120px]">
+                      <p className="text-[10px] text-neutral font-bold mb-0.5">
+                        CANTIDAD
+                      </p>
+                      <p className="text-sm font-bold text-accent">
+                        {shares > 0 ? `${shares} acc` : "—"}
+                      </p>
+                    </div>
+                    {shares > 0 && (
+                      <div className="bg-bg border border-border rounded px-4 py-2 text-center min-w-[120px]">
+                        <p className="text-[10px] text-neutral font-bold mb-0.5">
+                          COSTO TOTAL
+                        </p>
+                        <p className="text-sm font-bold text-text-main">
+                          {fmtMoney2(
+                            Math.round(totalCost * 100) / 100,
+                            sym
+                          )}
+                        </p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
           </div>
 
           {/* Charts */}
