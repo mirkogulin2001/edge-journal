@@ -22,6 +22,7 @@ export default function LoginPage() {
   const [regMsg, setRegMsg] = useState("");
   const [regLoading, setRegLoading] = useState(false);
   const [tcAccepted, setTcAccepted] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
 
   async function handleLogin(e: FormEvent) {
     e.preventDefault();
@@ -173,8 +174,17 @@ export default function LoginPage() {
                 />
                 <span>
                   Acepto los{" "}
-                  <span className="text-accent">Términos y Condiciones</span> de
-                  Edge Journal
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTerms(true);
+                    }}
+                    className="text-accent underline hover:text-accent/80 transition"
+                  >
+                    Términos y Condiciones
+                  </button>{" "}
+                  de Edge Journal
                 </span>
               </label>
               {regMsg && (
@@ -205,6 +215,103 @@ export default function LoginPage() {
                 </button>
               </div>
             </form>
+          </div>
+        )}
+
+        {/* Terms modal */}
+        {showTerms && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] px-4">
+            <div className="bg-card border border-border rounded-lg w-full max-w-lg shadow-2xl max-h-[80vh] flex flex-col">
+              <div className="flex items-center justify-between p-4 border-b border-border">
+                <h2 className="text-lg font-bold text-text-main tracking-wide">
+                  TÉRMINOS Y CONDICIONES
+                </h2>
+                <button
+                  onClick={() => setShowTerms(false)}
+                  className="text-neutral hover:text-text-main text-lg"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="p-4 overflow-y-auto text-sm text-neutral space-y-3">
+                <p className="text-xs text-neutral/60">
+                  Última actualización: julio 2026
+                </p>
+                <h3 className="font-bold text-text-main">1. Aceptación</h3>
+                <p>
+                  Al crear una cuenta en Edge Journal aceptás estos términos. Si
+                  no estás de acuerdo, no utilices la plataforma.
+                </p>
+                <h3 className="font-bold text-text-main">
+                  2. Naturaleza del servicio
+                </h3>
+                <p>
+                  Edge Journal es una herramienta de registro y análisis de
+                  operaciones bursátiles con fines informativos y educativos. NO
+                  constituye asesoramiento financiero, recomendación de inversión
+                  ni oferta de compra o venta de ningún instrumento. Toda
+                  decisión de inversión es exclusiva responsabilidad del usuario.
+                </p>
+                <h3 className="font-bold text-text-main">
+                  3. Datos que registrás
+                </h3>
+                <p>
+                  Para funcionar, la plataforma almacena la información que vos
+                  cargás: usuario, nombre, capital de referencia, operaciones
+                  (activos, precios, cantidades, fechas, notas), aportes y
+                  retiros, y parámetros de estrategia. Esta información se
+                  guarda en una base de datos gestionada (Supabase) y se usa
+                  únicamente para brindarte las funcionalidades de la plataforma.
+                </p>
+                <h3 className="font-bold text-text-main">4. Privacidad</h3>
+                <p>
+                  Tus datos no se venden, alquilan ni comparten con terceros.
+                  Solo son accesibles desde tu cuenta. Podés solicitar la
+                  eliminación completa de tu cuenta y sus datos en cualquier
+                  momento.
+                </p>
+                <h3 className="font-bold text-text-main">
+                  5. Datos de mercado
+                </h3>
+                <p>
+                  Los precios y cotizaciones provienen de fuentes de terceros
+                  (Yahoo Finance) y pueden contener demoras, errores u
+                  omisiones. No se garantiza su exactitud ni disponibilidad. Los
+                  cálculos de rendimiento derivados son estimaciones y pueden
+                  diferir de los valores oficiales de tu broker.
+                </p>
+                <h3 className="font-bold text-text-main">
+                  6. Limitación de responsabilidad
+                </h3>
+                <p>
+                  La plataforma se ofrece &quot;tal cual&quot;, sin garantías de
+                  ningún tipo. No nos responsabilizamos por pérdidas o daños
+                  derivados del uso de la plataforma, de decisiones de inversión
+                  tomadas en base a su información, ni por interrupciones del
+                  servicio o pérdida de datos.
+                </p>
+                <h3 className="font-bold text-text-main">
+                  7. Seguridad de la cuenta
+                </h3>
+                <p>
+                  Sos responsable de mantener la confidencialidad de tus
+                  credenciales. Evitá reutilizar contraseñas de otros servicios.
+                </p>
+                <h3 className="font-bold text-text-main">8. Modificaciones</h3>
+                <p>
+                  Estos términos pueden actualizarse. El uso continuado de la
+                  plataforma tras una modificación implica su aceptación.
+                </p>
+              </div>
+              <div className="p-4 border-t border-border">
+                <button
+                  onClick={() => setShowTerms(false)}
+                  className="w-full py-2 border border-border text-neutral font-bold rounded hover:text-text-main transition"
+                >
+                  CERRAR
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

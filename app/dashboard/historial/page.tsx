@@ -10,6 +10,7 @@ import {
   closeTradeTotal,
   getOpenTrades,
   updateTradeExPostBe,
+  updateTrade,
 } from "@/lib/db/trades";
 import { curSym, fmtMoney2, getStrategyKeys } from "@/lib/calculations/helpers";
 import type { Trade, ClosedTradeWithPct } from "@/types/trade";
@@ -233,6 +234,74 @@ export default function HistorialPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editValues, setEditValues] = useState({
+    symbol: "",
+    side: "LONG",
+    entry_price: 0,
+    exit_price: 0,
+    quantity: 0,
+    entry_date: "",
+    exit_date: "",
+    initial_stop_loss: 0,
+    result_type: "WIN",
+  });
+  const [saving, setSaving] = useState(false);
+
+  function startEdit(t: ClosedTradeWithPct) {
+    setEditingId(t.id);
+    setSelectedIds([]);
+    setEditValues({
+      symbol: t.symbol,
+      side: t.side,
+      entry_price: t.entry_price,
+      exit_price: t.exit_price ?? 0,
+      quantity: t.quantity,
+      entry_date: t.entry_date,
+      exit_date: t.exit_date || "",
+      initial_stop_loss: t.initial_stop_loss,
+      result_type: t.result_type || "WIN",
+    });
+  }
+
+  async function saveEdit() {
+    if (editingId == null) return;
+    setSaving(true);
+    const ok = await updateTrade(editingId, editValues);
+    setSaving(false);
+    if (ok) {
+      setEditingId(null);
+      mutateTrades();
+      setMsg("Trade actualizado");
+    } else {
+      setMsg("Error al actualizar");
+    }
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+  }
+
+  const previewCalc = useMemo(() => {
+    const { side, entry_price, exit_price, quantity, initial_stop_loss } = editValues;
+    const pnl =
+      side === "LONG"
+        ? (exit_price - entry_price) * quantity
+        : (entry_price - exit_price) * quantity;
+    const cost = entry_price * quantity;
+    const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+    let rr = 0;
+    if (initial_stop_loss !== 0 && initial_stop_loss !== entry_price) {
+      const risk = Math.abs(entry_price - initial_stop_loss) * quantity;
+      rr = risk > 0 ? pnl / risk : 0;
+    }
+    return {
+      pnl: Math.round(pnl * 100) / 100,
+      rr: Math.round(rr * 100) / 100,
+      pnlPct: Math.round(pnlPct * 100) / 100,
+    };
+  }, [editValues]);
+
   function handleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -272,17 +341,17 @@ export default function HistorialPage() {
   }
 
   function handleRowClick(t: MergedTrade) {
+    if (editingId != null) return;
     if (t.closes_count > 1) {
       toggleExpand(t);
     } else {
-      const isSelected = selectedIds.length === 1 && selectedIds[0] === t.id;
-      setSelectedIds(isSelected ? [] : [t.id]);
+      startEdit(t);
     }
   }
 
-  function handleChildClick(childId: number) {
-    const isSelected = selectedIds.length === 1 && selectedIds[0] === childId;
-    setSelectedIds(isSelected ? [] : [childId]);
+  function handleChildClick(child: ClosedTradeWithPct) {
+    if (editingId != null) return;
+    startEdit(child);
   }
 
   async function handleToggleExPostBe(t: MergedTrade, e: React.MouseEvent) {
@@ -292,23 +361,6 @@ export default function HistorialPage() {
       await updateTradeExPostBe(id, newVal);
     }
     mutateTrades();
-  }
-
-  async function handleDeleteSelected() {
-    if (selectedIds.length === 0) return;
-    if (!confirm("¿Eliminar este trade del historial?")) return;
-    let allOk = true;
-    for (const id of selectedIds) {
-      const ok = await deleteTrade(id);
-      if (!ok) allOk = false;
-    }
-    if (allOk) {
-      setMsg("Trade eliminado.");
-      setSelectedIds([]);
-      mutateTrades();
-    } else {
-      setMsg("Error al eliminar");
-    }
   }
 
   async function handleDeleteAll() {
@@ -410,6 +462,8 @@ export default function HistorialPage() {
 
   const INPUT_CLS =
     "bg-bg border border-border rounded px-3 py-1.5 text-text-main text-sm focus:border-accent outline-none";
+  const EDIT_CLS =
+    "bg-bg border border-accent/40 rounded px-1.5 py-1 text-text-main text-xs focus:border-accent outline-none";
 
   function resultColor(rt?: string) {
     if (rt === "WIN") return "text-accent";
@@ -424,11 +478,22 @@ export default function HistorialPage() {
       {/* Action bar */}
       <div className="flex flex-wrap items-center gap-3">
         <button
-          onClick={handleDeleteSelected}
-          disabled={selectedIds.length === 0}
+          onClick={async () => {
+            if (editingId == null) return;
+            if (!confirm("¿Eliminar este trade del historial?")) return;
+            const ok = await deleteTrade(editingId);
+            if (ok) {
+              setMsg("Trade eliminado.");
+              setEditingId(null);
+              mutateTrades();
+            } else {
+              setMsg("Error al eliminar");
+            }
+          }}
+          disabled={editingId == null}
           className="px-4 py-2 border border-border rounded text-sm font-bold text-text-main hover:border-accent transition disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          BORRAR SELECCION
+          BORRAR TRADE
         </button>
         <button
           onClick={handleDeleteAll}
@@ -625,23 +690,137 @@ export default function HistorialPage() {
                 pagedTrades.flatMap((t, i) => {
                   const isExpanded =
                     t.closes_count > 1 && expandedKeys.has(groupKey(t));
-                  const isGroupSelected =
-                    selectedIds.length > 0 &&
-                    t.child_ids.some((id) => selectedIds.includes(id));
                   const pnl = t.pnl ?? 0;
                   const pnlPct = t.pnl_pct;
                   const isBe = t.result_type === "BE";
+                  const isEditing = t.closes_count === 1 && editingId === t.id;
 
-                  const mainRow = (
+                  const mainRow = isEditing ? (
+                    <tr
+                      key={`edit-${t.id}`}
+                      className="bg-accent/5"
+                    >
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          onClick={cancelEdit}
+                          className="text-neutral hover:text-negative text-sm"
+                          title="Cancelar"
+                        >
+                          ✕
+                        </button>
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="date"
+                          value={editValues.entry_date}
+                          onChange={(e) => setEditValues((v) => ({ ...v, entry_date: e.target.value }))}
+                          className={`${EDIT_CLS} w-[120px]`}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="text"
+                          value={editValues.symbol}
+                          onChange={(e) => setEditValues((v) => ({ ...v, symbol: e.target.value.toUpperCase() }))}
+                          className={`${EDIT_CLS} w-20`}
+                        />
+                      </td>
+                      <td className="px-3 py-2">
+                        <select
+                          value={editValues.side}
+                          onChange={(e) => setEditValues((v) => ({ ...v, side: e.target.value }))}
+                          className={EDIT_CLS}
+                        >
+                          <option value="LONG">LONG</option>
+                          <option value="SHORT">SHORT</option>
+                        </select>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          value={editValues.quantity}
+                          onChange={(e) => setEditValues((v) => ({ ...v, quantity: Math.max(0, parseInt(e.target.value) || 0) }))}
+                          className={`${EDIT_CLS} w-16 text-right`}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <select
+                          value={editValues.result_type}
+                          onChange={(e) => setEditValues((v) => ({ ...v, result_type: e.target.value }))}
+                          className={EDIT_CLS}
+                        >
+                          <option value="WIN">WIN</option>
+                          <option value="LOSS">LOSS</option>
+                          <option value="BE">BE</option>
+                        </select>
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editValues.entry_price}
+                          onChange={(e) => setEditValues((v) => ({ ...v, entry_price: parseFloat(e.target.value) || 0 }))}
+                          className={`${EDIT_CLS} w-24 text-right`}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editValues.exit_price}
+                          onChange={(e) => setEditValues((v) => ({ ...v, exit_price: parseFloat(e.target.value) || 0 }))}
+                          className={`${EDIT_CLS} w-24 text-right`}
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={editValues.initial_stop_loss}
+                          onChange={(e) => setEditValues((v) => ({ ...v, initial_stop_loss: parseFloat(e.target.value) || 0 }))}
+                          className={`${EDIT_CLS} w-24 text-right`}
+                        />
+                      </td>
+                      {strategyKeys.map((k) => (
+                        <td key={k} className="px-3 py-2 text-neutral text-xs">
+                          {t.tags?.[k] || ""}
+                        </td>
+                      ))}
+                      <td className={`px-3 py-2 text-right text-xs ${previewCalc.rr >= 0 ? "text-accent" : "text-negative"}`}>
+                        {previewCalc.rr.toFixed(2)}R
+                      </td>
+                      <td className={`px-3 py-2 text-right text-xs font-semibold ${previewCalc.pnl >= 0 ? "text-accent" : "text-negative"}`}>
+                        {fmtMoney2(previewCalc.pnl, sym)}
+                      </td>
+                      <td className={`px-3 py-2 text-right text-xs ${previewCalc.pnlPct >= 0 ? "text-accent" : "text-negative"}`}>
+                        {previewCalc.pnlPct.toFixed(2)}%
+                      </td>
+                      <td className="px-3 py-2">
+                        <input
+                          type="date"
+                          value={editValues.exit_date}
+                          onChange={(e) => setEditValues((v) => ({ ...v, exit_date: e.target.value }))}
+                          className={`${EDIT_CLS} w-[120px]`}
+                        />
+                      </td>
+                      <td className="px-2 py-2 text-center">
+                        <button
+                          onClick={saveEdit}
+                          disabled={saving}
+                          className="px-2.5 py-1 bg-accent text-bg text-[10px] font-bold rounded hover:bg-accent/80 transition disabled:opacity-50"
+                        >
+                          {saving ? "..." : "OK"}
+                        </button>
+                      </td>
+                    </tr>
+                  ) : (
                     <tr
                       key={`main-${t.id}`}
                       onClick={() => handleRowClick(t)}
                       className={`cursor-pointer transition-colors ${
-                        isGroupSelected
-                          ? "bg-accent/10"
-                          : i % 2 === 1
-                            ? "bg-row-odd hover:bg-neutral/5"
-                            : "hover:bg-neutral/5"
+                        i % 2 === 1
+                          ? "bg-row-odd hover:bg-neutral/5"
+                          : "hover:bg-neutral/5"
                       }`}
                     >
                       <td className="px-3 py-2 text-center text-neutral">
@@ -726,20 +905,137 @@ export default function HistorialPage() {
                     const childCost = child.entry_price * child.quantity;
                     const childPnlPct =
                       childCost > 0 ? (childPnl / childCost) * 100 : 0;
-                    const isChildSelected = selectedIds.includes(child.id);
+                    const isChildEditing = editingId === child.id;
+
+                    if (isChildEditing) {
+                      return (
+                        <tr
+                          key={`child-edit-${child.id}`}
+                          className="bg-accent/5 border-l-2 border-accent"
+                        >
+                          <td className="px-3 py-1.5 text-center">
+                            <button
+                              onClick={cancelEdit}
+                              className="text-neutral hover:text-negative text-xs"
+                            >
+                              ✕
+                            </button>
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="date"
+                              value={editValues.entry_date}
+                              onChange={(e) => setEditValues((v) => ({ ...v, entry_date: e.target.value }))}
+                              className={`${EDIT_CLS} w-[120px]`}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="text"
+                              value={editValues.symbol}
+                              onChange={(e) => setEditValues((v) => ({ ...v, symbol: e.target.value.toUpperCase() }))}
+                              className={`${EDIT_CLS} w-20`}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <select
+                              value={editValues.side}
+                              onChange={(e) => setEditValues((v) => ({ ...v, side: e.target.value }))}
+                              className={EDIT_CLS}
+                            >
+                              <option value="LONG">LONG</option>
+                              <option value="SHORT">SHORT</option>
+                            </select>
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <input
+                              type="number"
+                              value={editValues.quantity}
+                              onChange={(e) => setEditValues((v) => ({ ...v, quantity: Math.max(0, parseInt(e.target.value) || 0) }))}
+                              className={`${EDIT_CLS} w-16 text-right`}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-center">
+                            <select
+                              value={editValues.result_type}
+                              onChange={(e) => setEditValues((v) => ({ ...v, result_type: e.target.value }))}
+                              className={EDIT_CLS}
+                            >
+                              <option value="WIN">WIN</option>
+                              <option value="LOSS">LOSS</option>
+                              <option value="BE">BE</option>
+                            </select>
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editValues.entry_price}
+                              onChange={(e) => setEditValues((v) => ({ ...v, entry_price: parseFloat(e.target.value) || 0 }))}
+                              className={`${EDIT_CLS} w-24 text-right`}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editValues.exit_price}
+                              onChange={(e) => setEditValues((v) => ({ ...v, exit_price: parseFloat(e.target.value) || 0 }))}
+                              className={`${EDIT_CLS} w-24 text-right`}
+                            />
+                          </td>
+                          <td className="px-3 py-1.5 text-right">
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={editValues.initial_stop_loss}
+                              onChange={(e) => setEditValues((v) => ({ ...v, initial_stop_loss: parseFloat(e.target.value) || 0 }))}
+                              className={`${EDIT_CLS} w-24 text-right`}
+                            />
+                          </td>
+                          {strategyKeys.map((k) => (
+                            <td key={k} className="px-3 py-1.5 text-neutral text-xs">
+                              {child.tags?.[k] || ""}
+                            </td>
+                          ))}
+                          <td className={`px-3 py-1.5 text-right text-xs ${previewCalc.rr >= 0 ? "text-accent" : "text-negative"}`}>
+                            {previewCalc.rr.toFixed(2)}R
+                          </td>
+                          <td className={`px-3 py-1.5 text-right text-xs font-semibold ${previewCalc.pnl >= 0 ? "text-accent" : "text-negative"}`}>
+                            {fmtMoney2(previewCalc.pnl, sym)}
+                          </td>
+                          <td className={`px-3 py-1.5 text-right text-xs ${previewCalc.pnlPct >= 0 ? "text-accent" : "text-negative"}`}>
+                            {previewCalc.pnlPct.toFixed(2)}%
+                          </td>
+                          <td className="px-3 py-1.5">
+                            <input
+                              type="date"
+                              value={editValues.exit_date}
+                              onChange={(e) => setEditValues((v) => ({ ...v, exit_date: e.target.value }))}
+                              className={`${EDIT_CLS} w-[120px]`}
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-center">
+                            <button
+                              onClick={saveEdit}
+                              disabled={saving}
+                              className="px-2 py-1 bg-accent text-bg text-[10px] font-bold rounded hover:bg-accent/80 transition disabled:opacity-50"
+                            >
+                              {saving ? "..." : "OK"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
 
                     return (
                       <tr
                         key={`child-${child.id}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleChildClick(child.id);
+                          handleChildClick(child);
                         }}
-                        className={`cursor-pointer transition-colors border-l-2 border-accent/30 ${
-                          isChildSelected
-                            ? "bg-accent/15"
-                            : "bg-bg/50 hover:bg-neutral/5"
-                        }`}
+                        className="cursor-pointer transition-colors border-l-2 border-accent/30 bg-bg/50 hover:bg-neutral/5"
                       >
                         <td className="px-3 py-1.5 text-center text-neutral text-[10px]">
                           └
