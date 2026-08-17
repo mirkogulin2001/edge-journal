@@ -201,6 +201,67 @@ export async function updateTradeExPostBe(
   return !updateErr;
 }
 
+export async function updateTrade(
+  tradeId: number,
+  updates: {
+    symbol?: string;
+    side?: string;
+    entry_price?: number;
+    exit_price?: number;
+    quantity?: number;
+    entry_date?: string;
+    exit_date?: string;
+    initial_stop_loss?: number;
+    result_type?: string;
+  }
+): Promise<boolean> {
+  const { data, error } = await getSupabase()
+    .from("trades")
+    .select("*")
+    .eq("id", tradeId)
+    .single();
+  if (error || !data) return false;
+
+  const trade = data as Trade;
+  const side = updates.side ?? trade.side;
+  const entryPrice = updates.entry_price ?? trade.entry_price;
+  const exitPrice = updates.exit_price ?? trade.exit_price;
+  const qty = updates.quantity ?? trade.quantity;
+  const sl = updates.initial_stop_loss ?? trade.initial_stop_loss;
+
+  const dbUpdate: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(updates)) {
+    if (v !== undefined) dbUpdate[k] = v;
+  }
+  if (updates.initial_stop_loss !== undefined) {
+    dbUpdate.current_stop_loss = updates.initial_stop_loss;
+  }
+
+  if (trade.status === "CLOSED" && exitPrice != null) {
+    const pnl =
+      side === "LONG"
+        ? (exitPrice - entryPrice) * qty
+        : (entryPrice - exitPrice) * qty;
+
+    let rr = 0;
+    if (sl !== 0 && sl !== entryPrice) {
+      const risk = Math.abs(entryPrice - sl) * qty;
+      rr = risk > 0 ? pnl / risk : 0;
+    }
+
+    dbUpdate.pnl = Math.round(pnl * 100) / 100;
+    dbUpdate.rr = Math.round(rr * 100) / 100;
+  }
+
+  if (Object.keys(dbUpdate).length === 0) return true;
+
+  const { error: updateErr } = await getSupabase()
+    .from("trades")
+    .update(dbUpdate)
+    .eq("id", tradeId);
+  return !updateErr;
+}
+
 export async function deleteAllClosedTrades(
   username: string
 ): Promise<boolean> {
