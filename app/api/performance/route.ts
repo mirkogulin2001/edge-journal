@@ -107,12 +107,13 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "user required" }, { status: 400 });
   const initialBalance = Math.max(1, parseFloat(balStr));
 
+  const noCache = req.nextUrl.searchParams.get("nocache") === "1";
   const cacheKey = `${user}_${initialBalance}_${benchmark}`;
   const now = Date.now();
 
   let fullRows: DailyRow[];
 
-  if (_cache[cacheKey] && now - _cache[cacheKey].ts < CACHE_TTL) {
+  if (!noCache && _cache[cacheKey] && now - _cache[cacheKey].ts < CACHE_TTL) {
     fullRows = _cache[cacheKey].data;
   } else {
     const supabase = createServerSupabase();
