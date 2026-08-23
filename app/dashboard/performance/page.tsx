@@ -6,6 +6,12 @@ import { curSym, fmtMoney, fmtMoneySign, fmtPct } from "@/lib/calculations/helpe
 import useSWR from "swr";
 import KpiCard from "@/components/ui/KpiCard";
 import PlotlyChart from "@/components/ui/PlotlyChart";
+import {
+  getCashMovements,
+  addCashMovement,
+  deleteCashMovement,
+} from "@/lib/db/cashMovements";
+import type { CashMovement } from "@/types/cashMovement";
 
 interface DailyRow {
   date: string;
@@ -46,9 +52,22 @@ export default function PerformancePage() {
     config.currency === "ARS" ? "SPY.BA" : "SPY"
   );
 
+  // Cash movements
+  const [showMovements, setShowMovements] = useState(false);
+  const [mvDate, setMvDate] = useState(() => new Date().toISOString().split("T")[0]);
+  const [mvAmount, setMvAmount] = useState("");
+  const [mvType, setMvType] = useState<"APORTE" | "RETIRO">("APORTE");
+  const [mvSaving, setMvSaving] = useState(false);
+  const [mvDeleting, setMvDeleting] = useState<number | null>(null);
+
+  const { data: cashMovements = [], mutate: mutateCash } = useSWR<CashMovement[]>(
+    user ? `cash-movements-${user}` : null,
+    () => getCashMovements(user!)
+  );
+
   const benchName = BENCHMARK_NAMES[benchmark] || benchmark;
 
-  const { data: perfData, isLoading } = useSWR<PerfResponse>(
+  const { data: perfData, isLoading, mutate: mutatePerf } = useSWR<PerfResponse>(
     user
       ? `performance-${user}-${savedBal}-${benchmark}-${period}`
       : null,
@@ -345,6 +364,165 @@ export default function PerformancePage() {
               subtitle={`${kpis.avgTuw.toFixed(0)} Promedio (Días)`}
               color={kpis.maxTuw > 0 ? "#F6465D" : "#EAECEF"}
             />
+          </div>
+
+          {/* Cash Movements Panel */}
+          <div className="bg-card border border-border rounded-lg shadow-xl overflow-hidden">
+            <button
+              onClick={() => setShowMovements(!showMovements)}
+              className="w-full px-4 py-3 flex items-center justify-between text-sm font-bold text-text-main tracking-wide hover:bg-bg/50 transition"
+            >
+              <span>APORTES Y RETIROS</span>
+              <span className="text-neutral text-xs">
+                {showMovements ? "▲ CERRAR" : "▼ ABRIR"}
+              </span>
+            </button>
+
+            {showMovements && (
+              <div className="border-t border-border">
+                {/* Add form */}
+                <div className="px-4 py-3 flex flex-wrap items-end gap-3 border-b border-border">
+                  <div>
+                    <label className="block text-[0.65rem] text-neutral uppercase tracking-wider font-bold mb-1">
+                      FECHA
+                    </label>
+                    <input
+                      type="date"
+                      value={mvDate}
+                      onChange={(e) => setMvDate(e.target.value)}
+                      className="bg-bg border border-border rounded px-3 py-2 text-sm text-text-main focus:border-accent outline-none transition w-[150px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[0.65rem] text-neutral uppercase tracking-wider font-bold mb-1">
+                      MONTO
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      value={mvAmount}
+                      onChange={(e) => setMvAmount(e.target.value)}
+                      className="bg-bg border border-border rounded px-3 py-2 text-sm text-text-main focus:border-accent outline-none transition w-[130px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[0.65rem] text-neutral uppercase tracking-wider font-bold mb-1">
+                      TIPO
+                    </label>
+                    <select
+                      value={mvType}
+                      onChange={(e) => setMvType(e.target.value as "APORTE" | "RETIRO")}
+                      className="bg-bg border border-border rounded px-3 py-2 text-sm text-text-main focus:border-accent outline-none transition"
+                    >
+                      <option value="APORTE">APORTE</option>
+                      <option value="RETIRO">RETIRO</option>
+                    </select>
+                  </div>
+                  <button
+                    disabled={mvSaving || !mvAmount || parseFloat(mvAmount) <= 0}
+                    onClick={async () => {
+                      setMvSaving(true);
+                      const ok = await addCashMovement(
+                        user!,
+                        mvDate,
+                        parseFloat(mvAmount),
+                        mvType
+                      );
+                      if (ok) {
+                        setMvAmount("");
+                        mutateCash();
+                        mutatePerf();
+                      }
+                      setMvSaving(false);
+                    }}
+                    className="px-4 py-2 bg-text-main text-bg text-sm font-bold rounded hover:-translate-y-0.5 active:translate-y-0 transition disabled:opacity-50"
+                  >
+                    {mvSaving ? "GUARDANDO..." : "AGREGAR"}
+                  </button>
+                </div>
+
+                {/* Movements table */}
+                {cashMovements.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-neutral text-sm">
+                    Sin movimientos registrados
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-bg text-neutral uppercase text-xs tracking-wider">
+                          <th className="px-4 py-2.5 text-left">Fecha</th>
+                          <th className="px-4 py-2.5 text-left">Tipo</th>
+                          <th className="px-4 py-2.5 text-right">Monto</th>
+                          <th className="px-4 py-2.5 text-center w-[60px]"></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cashMovements.map((m, i) => (
+                          <tr
+                            key={m.id}
+                            className={i % 2 === 1 ? "bg-row-odd" : ""}
+                          >
+                            <td className="px-4 py-2 text-text-main">
+                              {m.movement_date}
+                            </td>
+                            <td className="px-4 py-2">
+                              <span
+                                className="text-xs font-bold px-2 py-0.5 rounded"
+                                style={{
+                                  color:
+                                    m.movement_type === "APORTE"
+                                      ? "#00B0BD"
+                                      : "#F6465D",
+                                  backgroundColor:
+                                    m.movement_type === "APORTE"
+                                      ? "rgba(0, 176, 189, 0.1)"
+                                      : "rgba(246, 70, 93, 0.1)",
+                                }}
+                              >
+                                {m.movement_type}
+                              </span>
+                            </td>
+                            <td
+                              className="px-4 py-2 text-right font-semibold"
+                              style={{
+                                color:
+                                  m.movement_type === "APORTE"
+                                    ? "#00B0BD"
+                                    : "#F6465D",
+                              }}
+                            >
+                              {m.movement_type === "APORTE" ? "+" : "-"}
+                              {fmtMoney(m.amount, sym)}
+                            </td>
+                            <td className="px-4 py-2 text-center">
+                              <button
+                                disabled={mvDeleting === m.id}
+                                onClick={async () => {
+                                  setMvDeleting(m.id);
+                                  const ok = await deleteCashMovement(m.id);
+                                  if (ok) {
+                                    mutateCash();
+                                    mutatePerf();
+                                  }
+                                  setMvDeleting(null);
+                                }}
+                                className="text-neutral hover:text-negative text-xs font-bold transition"
+                                title="Eliminar"
+                              >
+                                {mvDeleting === m.id ? "..." : "✕"}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Charts */}
