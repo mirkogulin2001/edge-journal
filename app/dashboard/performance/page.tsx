@@ -67,17 +67,24 @@ export default function PerformancePage() {
 
   const benchName = BENCHMARK_NAMES[benchmark] || benchmark;
 
+  const [cacheBust, setCacheBust] = useState(0);
+
   const { data: perfData, isLoading, mutate: mutatePerf } = useSWR<PerfResponse>(
     user
-      ? `performance-${user}-${savedBal}-${benchmark}-${period}`
+      ? `performance-${user}-${savedBal}-${benchmark}-${period}-${cacheBust}`
       : null,
     async () => {
+      const nc = cacheBust > 0 ? "&nocache=1" : "";
       const res = await fetch(
-        `/api/performance?user=${user}&balance=${savedBal}&benchmark=${benchmark}&period=${period}`
+        `/api/performance?user=${user}&balance=${savedBal}&benchmark=${benchmark}&period=${period}${nc}`
       );
       return res.json();
     }
   );
+
+  function refreshPerformance() {
+    setCacheBust((n) => n + 1);
+  }
 
   const rows = perfData?.rows || [];
   const periodLabel = perfData?.periodLabel || "";
@@ -433,7 +440,7 @@ export default function PerformancePage() {
                       if (ok) {
                         setMvAmount("");
                         mutateCash();
-                        mutatePerf();
+                        refreshPerformance();
                       }
                       setMvSaving(false);
                     }}
