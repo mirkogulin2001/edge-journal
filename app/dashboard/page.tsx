@@ -112,11 +112,13 @@ export default function DashboardHomePage() {
   );
 
   // News feed — general + portfolio-specific
-  const { data: generalNews = [] } = useSWR<NewsItem[]>(
+  const { data: generalNews = [], error: newsError } = useSWR<NewsItem[]>(
     "news-general",
     async () => {
       const res = await fetch("/api/news");
-      return res.json();
+      const json = await res.json();
+      if (!Array.isArray(json)) return [];
+      return json;
     },
     { refreshInterval: 300000 }
   );
@@ -125,7 +127,9 @@ export default function DashboardHomePage() {
     tickers.length ? `news-portfolio-${tickers.join(",")}` : null,
     async () => {
       const res = await fetch(`/api/news?tickers=${tickers.join(",")}`);
-      return res.json();
+      const json = await res.json();
+      if (!Array.isArray(json)) return [];
+      return json;
     },
     { refreshInterval: 300000 }
   );
@@ -199,231 +203,235 @@ export default function DashboardHomePage() {
   }, [closedTrades, initialBalance]);
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      {/* Account Balance */}
-      <div className="bg-card border border-border rounded-lg shadow-xl p-6">
-        <p className="text-xs text-neutral uppercase tracking-wider font-bold mb-1">
-          BALANCE DE CUENTA
-        </p>
-        <p
-          className="text-3xl font-bold tracking-tight"
-          style={{ color: accountBalance >= initialBalance ? COLOR_POS : COLOR_NEG }}
-        >
-          {fmtMoney(accountBalance, sym)}
-        </p>
-        <p className="text-xs text-neutral mt-1">
-          Capital inicial: {fmtMoney(initialBalance, sym)} &middot; PnL realizado:{" "}
-          <span style={{ color: pnlColor(totalRealizedPnl) }}>
-            {fmtMoneySign(totalRealizedPnl, sym)}
-          </span>
-        </p>
-      </div>
-
-      {/* PnL Summary Row */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard
-          value={fmtMoneySign(pnlToday, sym)}
-          label="PNL HOY"
-          color={pnlColor(pnlToday)}
-        />
-        <KpiCard
-          value={fmtMoneySign(pnlWeek, sym)}
-          label="PNL SEMANA"
-          color={pnlColor(pnlWeek)}
-        />
-        <KpiCard
-          value={fmtMoneySign(pnlMonth, sym)}
-          label="PNL MES"
-          color={pnlColor(pnlMonth)}
-        />
-        <KpiCard
-          value={fmtMoneySign(totalRealizedPnl, sym)}
-          label="PNL TOTAL"
-          color={pnlColor(totalRealizedPnl)}
-        />
-      </div>
-
-      {/* Open Positions Count */}
-      <div className="bg-card border border-border rounded-lg shadow-xl p-4 flex items-center justify-between">
-        <div>
+    <div className="flex flex-col lg:flex-row gap-6">
+      {/* LEFT COLUMN — Account data */}
+      <div className="space-y-6 flex-1 min-w-0">
+        {/* Account Balance */}
+        <div className="bg-card border border-border rounded-lg shadow-xl p-6">
           <p className="text-xs text-neutral uppercase tracking-wider font-bold mb-1">
-            POSICIONES ABIERTAS
-          </p>
-          <p className="text-2xl font-bold text-text-main">{openTrades.length}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-neutral uppercase tracking-wider font-bold mb-1">
-            PNL NO REALIZADO
+            BALANCE DE CUENTA
           </p>
           <p
-            className="text-xl font-bold"
-            style={{ color: pnlColor(unrealizedPnl) }}
+            className="text-3xl font-bold tracking-tight"
+            style={{ color: accountBalance >= initialBalance ? COLOR_POS : COLOR_NEG }}
           >
-            {fmtMoneySign(Math.round(unrealizedPnl * 100) / 100, sym)}
+            {fmtMoney(accountBalance, sym)}
+          </p>
+          <p className="text-xs text-neutral mt-1">
+            Capital inicial: {fmtMoney(initialBalance, sym)} &middot; PnL realizado:{" "}
+            <span style={{ color: pnlColor(totalRealizedPnl) }}>
+              {fmtMoneySign(totalRealizedPnl, sym)}
+            </span>
           </p>
         </div>
-      </div>
 
-      {/* Last 5 Closed Trades */}
-      <div className="bg-card border border-border rounded-lg shadow-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-border font-bold text-text-main tracking-wide text-sm">
-          ULTIMOS CIERRES
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-bg text-neutral uppercase text-xs tracking-wider">
-                <th className="px-3 py-2.5 text-left">Symbol</th>
-                <th className="px-3 py-2.5 text-left">Side</th>
-                <th className="px-3 py-2.5 text-right">PnL</th>
-                <th className="px-3 py-2.5 text-center">Resultado</th>
-                <th className="px-3 py-2.5 text-right">Fecha</th>
-              </tr>
-            </thead>
-            <tbody>
-              {last5.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="px-3 py-8 text-center text-neutral">
-                    Sin trades cerrados
-                  </td>
-                </tr>
-              ) : (
-                last5.map((t, i) => (
-                  <tr
-                    key={t.id}
-                    className={i % 2 === 1 ? "bg-row-odd" : ""}
-                  >
-                    <td className="px-3 py-2 font-semibold text-text-main">
-                      {t.symbol}
-                    </td>
-                    <td
-                      className={`px-3 py-2 font-semibold ${
-                        t.side === "LONG" ? "text-accent" : "text-negative"
-                      }`}
-                    >
-                      {t.side}
-                    </td>
-                    <td
-                      className="px-3 py-2 text-right font-semibold"
-                      style={{ color: pnlColor(t.pnl ?? 0) }}
-                    >
-                      {fmtMoneySign(t.pnl ?? 0, sym)}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      <span
-                        className="text-xs font-bold px-2 py-0.5 rounded"
-                        style={{
-                          color: resultColor(t.result_type),
-                          backgroundColor:
-                            t.result_type === "WIN"
-                              ? "rgba(0, 176, 189, 0.1)"
-                              : t.result_type === "LOSS"
-                                ? "rgba(246, 70, 93, 0.1)"
-                                : "rgba(132, 142, 156, 0.1)",
-                        }}
-                      >
-                        {t.result_type ?? "-"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right text-neutral">
-                      {t.exit_date ?? "-"}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Mini Equity Curve */}
-      {equityCurve.x.length > 1 && (
-        <div className="space-y-2">
-          <h3 className="text-xs font-bold text-neutral tracking-wider">
-            CURVA DE EQUITY
-          </h3>
-          <PlotlyChart
-            data={[
-              {
-                type: "scatter",
-                mode: "lines",
-                x: equityCurve.x,
-                y: equityCurve.y,
-                line: {
-                  color: COLOR_POS,
-                  width: 2.5,
-                  shape: "spline",
-                  smoothing: 1.0,
-                },
-                fill: "tozeroy",
-                fillcolor: "rgba(0, 176, 189, 0.06)",
-                hovertemplate: `%{x}<br>${sym}%{y:,.0f}<extra></extra>`,
-              },
-            ]}
-            layout={{
-              height: 220,
-              margin: { l: 50, r: 20, t: 10, b: 30 },
-              xaxis: {
-                showgrid: false,
-              },
-              yaxis: {
-                tickprefix: sym,
-                tickformat: ",.0f",
-              },
-            }}
+        {/* PnL Summary Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <KpiCard
+            value={fmtMoneySign(pnlToday, sym)}
+            label="PNL HOY"
+            color={pnlColor(pnlToday)}
+          />
+          <KpiCard
+            value={fmtMoneySign(pnlWeek, sym)}
+            label="PNL SEMANA"
+            color={pnlColor(pnlWeek)}
+          />
+          <KpiCard
+            value={fmtMoneySign(pnlMonth, sym)}
+            label="PNL MES"
+            color={pnlColor(pnlMonth)}
+          />
+          <KpiCard
+            value={fmtMoneySign(totalRealizedPnl, sym)}
+            label="PNL TOTAL"
+            color={pnlColor(totalRealizedPnl)}
           />
         </div>
-      )}
 
-      {/* Market Feed */}
-      {marketQuotes.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-xs font-bold text-neutral tracking-wider">
-            MERCADOS
-          </h3>
-          {Object.entries(marketByCategory).map(([cat, quotes]) => (
-            <div key={cat}>
-              <p className="text-[0.65rem] text-neutral uppercase tracking-wider font-bold mb-2">
-                {cat}
-              </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                {quotes.map((q) => (
-                  <div
-                    key={q.symbol}
-                    className="bg-card border border-border rounded px-3 py-2.5 hover:border-accent transition"
-                  >
-                    <p className="text-[0.68rem] text-neutral font-bold truncate">
-                      {q.name}
-                    </p>
-                    <p className="text-sm font-bold text-text-main mt-0.5">
-                      {q.price.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
-                    </p>
-                    <p
-                      className="text-xs font-semibold mt-0.5"
-                      style={{
-                        color: q.changePct > 0 ? COLOR_POS : q.changePct < 0 ? COLOR_NEG : COLOR_NEUTRAL,
-                      }}
-                    >
-                      {q.changePct > 0 ? "+" : ""}
-                      {q.changePct.toFixed(2)}%
-                      <span className="text-neutral ml-1">
-                        ({q.change > 0 ? "+" : ""}
-                        {q.change.toFixed(2)})
-                      </span>
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+        {/* Open Positions Count */}
+        <div className="bg-card border border-border rounded-lg shadow-xl p-4 flex items-center justify-between">
+          <div>
+            <p className="text-xs text-neutral uppercase tracking-wider font-bold mb-1">
+              POSICIONES ABIERTAS
+            </p>
+            <p className="text-2xl font-bold text-text-main">{openTrades.length}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-neutral uppercase tracking-wider font-bold mb-1">
+              PNL NO REALIZADO
+            </p>
+            <p
+              className="text-xl font-bold"
+              style={{ color: pnlColor(unrealizedPnl) }}
+            >
+              {fmtMoneySign(Math.round(unrealizedPnl * 100) / 100, sym)}
+            </p>
+          </div>
         </div>
-      )}
 
-      {/* News Feed */}
-      {(portfolioNews.length > 0 || generalNews.length > 0) && (
+        {/* Last 5 Closed Trades */}
+        <div className="bg-card border border-border rounded-lg shadow-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-border font-bold text-text-main tracking-wide text-sm">
+            ULTIMOS CIERRES
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-bg text-neutral uppercase text-xs tracking-wider">
+                  <th className="px-3 py-2.5 text-left">Symbol</th>
+                  <th className="px-3 py-2.5 text-left">Side</th>
+                  <th className="px-3 py-2.5 text-right">PnL</th>
+                  <th className="px-3 py-2.5 text-center">Resultado</th>
+                  <th className="px-3 py-2.5 text-right">Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                {last5.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-3 py-8 text-center text-neutral">
+                      Sin trades cerrados
+                    </td>
+                  </tr>
+                ) : (
+                  last5.map((t, i) => (
+                    <tr
+                      key={t.id}
+                      className={i % 2 === 1 ? "bg-row-odd" : ""}
+                    >
+                      <td className="px-3 py-2 font-semibold text-text-main">
+                        {t.symbol}
+                      </td>
+                      <td
+                        className={`px-3 py-2 font-semibold ${
+                          t.side === "LONG" ? "text-accent" : "text-negative"
+                        }`}
+                      >
+                        {t.side}
+                      </td>
+                      <td
+                        className="px-3 py-2 text-right font-semibold"
+                        style={{ color: pnlColor(t.pnl ?? 0) }}
+                      >
+                        {fmtMoneySign(t.pnl ?? 0, sym)}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span
+                          className="text-xs font-bold px-2 py-0.5 rounded"
+                          style={{
+                            color: resultColor(t.result_type),
+                            backgroundColor:
+                              t.result_type === "WIN"
+                                ? "rgba(0, 176, 189, 0.1)"
+                                : t.result_type === "LOSS"
+                                  ? "rgba(246, 70, 93, 0.1)"
+                                  : "rgba(132, 142, 156, 0.1)",
+                          }}
+                        >
+                          {t.result_type ?? "-"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right text-neutral">
+                        {t.exit_date ?? "-"}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Mini Equity Curve */}
+        {equityCurve.x.length > 1 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-bold text-neutral tracking-wider">
+              CURVA DE EQUITY
+            </h3>
+            <PlotlyChart
+              data={[
+                {
+                  type: "scatter",
+                  mode: "lines",
+                  x: equityCurve.x,
+                  y: equityCurve.y,
+                  line: {
+                    color: COLOR_POS,
+                    width: 2.5,
+                    shape: "spline",
+                    smoothing: 1.0,
+                  },
+                  fill: "tozeroy",
+                  fillcolor: "rgba(0, 176, 189, 0.06)",
+                  hovertemplate: `%{x}<br>${sym}%{y:,.0f}<extra></extra>`,
+                },
+              ]}
+              layout={{
+                height: 220,
+                margin: { l: 50, r: 20, t: 10, b: 30 },
+                xaxis: {
+                  showgrid: false,
+                },
+                yaxis: {
+                  tickprefix: sym,
+                  tickformat: ",.0f",
+                },
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* RIGHT COLUMN — Market feed + News */}
+      <div className="w-full lg:w-[380px] flex-shrink-0 space-y-4">
+        {/* Market Feed */}
+        {marketQuotes.length > 0 && (
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold text-neutral tracking-wider">
+              MERCADOS
+            </h3>
+            {Object.entries(marketByCategory).map(([cat, quotes]) => (
+              <div key={cat}>
+                <p className="text-[0.65rem] text-neutral uppercase tracking-wider font-bold mb-1.5">
+                  {cat}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {quotes.map((q) => (
+                    <div
+                      key={q.symbol}
+                      className="bg-card border border-border rounded px-2.5 py-2 hover:border-accent transition"
+                    >
+                      <p className="text-[0.65rem] text-neutral font-bold truncate">
+                        {q.name}
+                      </p>
+                      <p className="text-sm font-bold text-text-main mt-0.5">
+                        {q.price.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
+                      <p
+                        className="text-[0.68rem] font-semibold mt-0.5"
+                        style={{
+                          color: q.changePct > 0 ? COLOR_POS : q.changePct < 0 ? COLOR_NEG : COLOR_NEUTRAL,
+                        }}
+                      >
+                        {q.changePct > 0 ? "+" : ""}
+                        {q.changePct.toFixed(2)}%
+                        <span className="text-neutral ml-1">
+                          ({q.change > 0 ? "+" : ""}
+                          {q.change.toFixed(2)})
+                        </span>
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* News Feed */}
         <div className="space-y-3">
           {/* Portfolio-specific news */}
           {portfolioNews.length > 0 && (
@@ -432,30 +440,30 @@ export default function DashboardHomePage() {
                 NOTICIAS DE TU PORTFOLIO
               </h3>
               <div className="space-y-2">
-                {portfolioNews.slice(0, 8).map((n) => (
+                {portfolioNews.slice(0, 6).map((n) => (
                   <a
                     key={n.id}
                     href={n.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="block bg-card border border-border rounded-lg p-3 hover:border-accent transition group"
+                    className="block bg-card border border-border rounded-lg p-2.5 hover:border-accent transition group"
                   >
-                    <div className="flex gap-3">
+                    <div className="flex gap-2.5">
                       {n.image && (
                         <img
                           src={n.image}
                           alt=""
-                          className="w-16 h-16 rounded object-cover flex-shrink-0"
+                          className="w-14 h-14 rounded object-cover flex-shrink-0"
                           onError={(e) => {
                             (e.target as HTMLImageElement).style.display = "none";
                           }}
                         />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-semibold text-text-main group-hover:text-accent transition line-clamp-2">
+                        <p className="text-[0.8rem] font-semibold text-text-main group-hover:text-accent transition line-clamp-2 leading-snug">
                           {n.headline}
                         </p>
-                        <p className="text-xs text-neutral mt-1 flex items-center gap-2">
+                        <p className="text-[0.65rem] text-neutral mt-1 flex items-center gap-1.5">
                           <span className="font-bold">{n.source}</span>
                           <span>
                             {new Date(n.datetime * 1000).toLocaleDateString("es-AR", {
@@ -483,48 +491,56 @@ export default function DashboardHomePage() {
           <h3 className="text-xs font-bold text-neutral tracking-wider">
             NOTICIAS DEL MERCADO
           </h3>
-          <div className="space-y-2">
-            {generalNews.slice(0, 10).map((n) => (
-              <a
-                key={n.id}
-                href={n.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="block bg-card border border-border rounded-lg p-3 hover:border-accent transition group"
-              >
-                <div className="flex gap-3">
-                  {n.image && (
-                    <img
-                      src={n.image}
-                      alt=""
-                      className="w-16 h-16 rounded object-cover flex-shrink-0"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = "none";
-                      }}
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-text-main group-hover:text-accent transition line-clamp-2">
-                      {n.headline}
-                    </p>
-                    <p className="text-xs text-neutral mt-1 flex items-center gap-2">
-                      <span className="font-bold">{n.source}</span>
-                      <span>
-                        {new Date(n.datetime * 1000).toLocaleDateString("es-AR", {
-                          day: "2-digit",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </p>
+          {generalNews.length > 0 ? (
+            <div className="space-y-2">
+              {generalNews.slice(0, 10).map((n) => (
+                <a
+                  key={n.id}
+                  href={n.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block bg-card border border-border rounded-lg p-2.5 hover:border-accent transition group"
+                >
+                  <div className="flex gap-2.5">
+                    {n.image && (
+                      <img
+                        src={n.image}
+                        alt=""
+                        className="w-14 h-14 rounded object-cover flex-shrink-0"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[0.8rem] font-semibold text-text-main group-hover:text-accent transition line-clamp-2 leading-snug">
+                        {n.headline}
+                      </p>
+                      <p className="text-[0.65rem] text-neutral mt-1 flex items-center gap-1.5">
+                        <span className="font-bold">{n.source}</span>
+                        <span>
+                          {new Date(n.datetime * 1000).toLocaleDateString("es-AR", {
+                            day: "2-digit",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </p>
+                    </div>
                   </div>
-                </div>
-              </a>
-            ))}
-          </div>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <p className="text-xs text-neutral py-4 text-center bg-card border border-border rounded-lg">
+              {newsError
+                ? "Error al cargar noticias"
+                : "Cargando noticias..."}
+            </p>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
