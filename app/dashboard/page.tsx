@@ -116,17 +116,22 @@ export default function DashboardHomePage() {
     "news-general",
     async () => {
       const res = await fetch("/api/news");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
       const json = await res.json();
       if (!Array.isArray(json)) return [];
       return json;
     },
-    { refreshInterval: 300000 }
+    { refreshInterval: 300000, shouldRetryOnError: true, errorRetryInterval: 60000 }
   );
 
   const { data: portfolioNews = [] } = useSWR<NewsItem[]>(
     tickers.length ? `news-portfolio-${tickers.join(",")}` : null,
     async () => {
       const res = await fetch(`/api/news?tickers=${tickers.join(",")}`);
+      if (!res.ok) return [];
       const json = await res.json();
       if (!Array.isArray(json)) return [];
       return json;
@@ -533,9 +538,9 @@ export default function DashboardHomePage() {
               ))}
             </div>
           ) : (
-            <p className="text-xs text-neutral py-4 text-center bg-card border border-border rounded-lg">
+            <p className="text-xs text-neutral py-4 px-3 text-center bg-card border border-border rounded-lg">
               {newsError
-                ? "Error al cargar noticias"
+                ? `Error: ${newsError.message || "No se pudieron cargar las noticias"}`
                 : "Cargando noticias..."}
             </p>
           )}
