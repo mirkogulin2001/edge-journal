@@ -108,20 +108,32 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const res = await fetch(
-      `https://finnhub.io/api/v1/news?category=general&token=${apiKey}`
-    );
+    const url = `https://finnhub.io/api/v1/news?category=general&token=${apiKey}`;
+    console.log(`[news] Fetching general news from Finnhub...`);
+    const res = await fetch(url);
+    console.log(`[news] Finnhub response status: ${res.status}`);
     if (!res.ok) {
+      const body = await res.text();
+      console.error(`[news] Finnhub error body: ${body}`);
       return NextResponse.json(
-        { error: `Finnhub ${res.status}` },
+        { error: `Finnhub ${res.status}: ${body}` },
         { status: 502 }
       );
     }
     const data = (await res.json()) as FinnhubNews[];
+    console.log(`[news] Got ${data.length} news items`);
+    if (!Array.isArray(data)) {
+      console.error(`[news] Unexpected response type: ${typeof data}`);
+      return NextResponse.json(
+        { error: "Finnhub returned unexpected format" },
+        { status: 502 }
+      );
+    }
     const mapped = mapNews(data).slice(0, 15);
     _generalCache = { data: mapped, ts: now };
     return NextResponse.json(mapped);
   } catch (e) {
+    console.error(`[news] Fetch error:`, e instanceof Error ? e.message : e);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Fetch error" },
       { status: 502 }
