@@ -51,6 +51,12 @@ function fmtVal(v: number, isPct: boolean, sym: string): string {
   return v < 0 ? `-${sym}${Math.abs(v).toFixed(0)}` : `${sym}${v.toFixed(0)}`;
 }
 
+interface CorrelationResult {
+  symbols: string[];
+  matrix: number[][];
+}
+
+type CorrelationPeriod = "1" | "3" | "5";
 type ChartMode = "TOTAL" | "SYMBOL";
 type ManagementTab = "close" | "partial" | "sl" | "delete";
 
@@ -119,6 +125,20 @@ export default function OperativaPage() {
 
   // Exposure chart
   const [chartMode, setChartMode] = useState<ChartMode>("TOTAL");
+
+  // Correlation matrix
+  const [corrPeriod, setCorrPeriod] = useState<CorrelationPeriod>("1");
+  const { data: corrData } = useSWR<CorrelationResult>(
+    tickers.length >= 2
+      ? `correlation-${tickers.sort().join(",")}-${corrPeriod}`
+      : null,
+    async () => {
+      const res = await fetch(
+        `/api/correlation?tickers=${tickers.join(",")}&years=${corrPeriod}`
+      );
+      return res.json();
+    }
+  );
 
   async function handleNewTrade(e: FormEvent) {
     e.preventDefault();
@@ -772,52 +792,143 @@ export default function OperativaPage() {
           </div>
         )}
 
-        {/* Exposure chart */}
+        {/* Exposure chart + Correlation matrix side by side */}
         {tradesWithMetrics.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold text-neutral tracking-wider">
-                EXPOSICION
-              </h3>
-              <div className="flex border border-border rounded overflow-hidden">
-                {(
-                  [
-                    { value: "TOTAL", label: "TOTAL" },
-                    { value: "SYMBOL", label: "POR ACTIVO" },
-                  ] as const
-                ).map((m) => (
-                  <button
-                    key={m.value}
-                    onClick={() => setChartMode(m.value)}
-                    className={`px-3 py-1 text-xs font-bold transition ${
-                      chartMode === m.value
-                        ? "bg-neutral/30 text-text-main"
-                        : "text-neutral hover:text-text-main"
-                    }`}
-                  >
-                    {m.label}
-                  </button>
-                ))}
+          <div className="flex flex-col xl:flex-row gap-4">
+            {/* Exposure chart */}
+            <div className="space-y-2 flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-neutral tracking-wider">
+                  EXPOSICION
+                </h3>
+                <div className="flex border border-border rounded overflow-hidden">
+                  {(
+                    [
+                      { value: "TOTAL", label: "TOTAL" },
+                      { value: "SYMBOL", label: "POR ACTIVO" },
+                    ] as const
+                  ).map((m) => (
+                    <button
+                      key={m.value}
+                      onClick={() => setChartMode(m.value)}
+                      className={`px-3 py-1 text-xs font-bold transition ${
+                        chartMode === m.value
+                          ? "bg-neutral/30 text-text-main"
+                          : "text-neutral hover:text-text-main"
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
               </div>
+              <PlotlyChart
+                data={chartData}
+                layout={{
+                  ...chartExtraLayout,
+                  height: 280,
+                  yaxis: {
+                    showgrid: true,
+                    gridcolor: "rgba(43, 49, 57, 0.5)",
+                    zerolinecolor: "#2B3139",
+                    ...tickOpts,
+                  },
+                  xaxis: {
+                    showgrid: false,
+                    zerolinecolor: "#2B3139",
+                    type: "category",
+                  },
+                }}
+              />
             </div>
-            <PlotlyChart
-              data={chartData}
-              layout={{
-                ...chartExtraLayout,
-                height: 300,
-                yaxis: {
-                  showgrid: true,
-                  gridcolor: "rgba(43, 49, 57, 0.5)",
-                  zerolinecolor: "#2B3139",
-                  ...tickOpts,
-                },
-                xaxis: {
-                  showgrid: false,
-                  zerolinecolor: "#2B3139",
-                  type: "category",
-                },
-              }}
-            />
+
+            {/* Correlation matrix */}
+            {corrData && corrData.symbols.length >= 2 && (
+              <div className="space-y-2 xl:w-[420px] flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-neutral tracking-wider">
+                    CORRELACION
+                  </h3>
+                  <div className="flex border border-border rounded overflow-hidden">
+                    {(
+                      [
+                        { value: "1", label: "1 AÑO" },
+                        { value: "3", label: "3 AÑOS" },
+                        { value: "5", label: "5 AÑOS" },
+                      ] as const
+                    ).map((p) => (
+                      <button
+                        key={p.value}
+                        onClick={() => setCorrPeriod(p.value)}
+                        className={`px-2.5 py-1 text-xs font-bold transition ${
+                          corrPeriod === p.value
+                            ? "bg-neutral/30 text-text-main"
+                            : "text-neutral hover:text-text-main"
+                        }`}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="bg-card border border-border rounded-lg overflow-auto shadow-xl">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr>
+                        <th className="px-2 py-2 text-neutral font-bold text-left sticky left-0 bg-card z-10"></th>
+                        {corrData.symbols.map((s) => (
+                          <th
+                            key={s}
+                            className="px-2 py-2 text-neutral font-bold text-center whitespace-nowrap"
+                          >
+                            {s.replace("-USD", "")}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {corrData.symbols.map((rowSym, ri) => (
+                        <tr key={rowSym}>
+                          <td className="px-2 py-1.5 font-bold text-text-main whitespace-nowrap sticky left-0 bg-card z-10">
+                            {rowSym.replace("-USD", "")}
+                          </td>
+                          {corrData.matrix[ri].map((val, ci) => {
+                            const abs = Math.abs(val);
+                            let bg: string;
+                            if (val >= 0.7) bg = `rgba(0, 176, 189, ${0.15 + abs * 0.55})`;
+                            else if (val >= 0.3) bg = `rgba(0, 176, 189, ${abs * 0.35})`;
+                            else if (val >= 0) bg = `rgba(0, 176, 189, ${abs * 0.15})`;
+                            else if (val >= -0.3) bg = `rgba(246, 70, 93, ${abs * 0.15})`;
+                            else if (val >= -0.7) bg = `rgba(246, 70, 93, ${abs * 0.35})`;
+                            else bg = `rgba(246, 70, 93, ${0.15 + abs * 0.55})`;
+
+                            const textColor =
+                              ri === ci
+                                ? "#00B0BD"
+                                : abs >= 0.5
+                                  ? "#EAECEF"
+                                  : "#848E9C";
+
+                            return (
+                              <td
+                                key={ci}
+                                className="px-2 py-1.5 text-center font-semibold"
+                                style={{
+                                  backgroundColor: bg,
+                                  color: textColor,
+                                }}
+                              >
+                                {val.toFixed(2)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
