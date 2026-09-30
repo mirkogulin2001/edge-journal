@@ -377,11 +377,17 @@ export default function OperativaPage() {
     }
     const totalInvested = Object.values(grouped).reduce((s, v) => s + v, 0);
     const liquidity = Math.max(0, accountBalance - totalInvested);
+    const isLeveraged = totalInvested > accountBalance;
+    const leverageAmount = isLeveraged ? totalInvested - accountBalance : 0;
+    const leverageRatio = accountBalance > 0 ? totalInvested / accountBalance : 0;
     return {
-      labels: [...Object.keys(grouped), "Liquidez"],
-      values: [...Object.values(grouped), liquidity],
+      labels: [...Object.keys(grouped), ...(liquidity > 0 ? ["Liquidez"] : [])],
+      values: [...Object.values(grouped), ...(liquidity > 0 ? [liquidity] : [])],
       totalInvested,
       liquidity,
+      isLeveraged,
+      leverageAmount,
+      leverageRatio,
     };
   }, [tradesWithMetrics, accountBalance]);
 
@@ -848,10 +854,12 @@ export default function OperativaPage() {
                 layout={{
                   ...chartExtraLayout,
                   height: 280,
+                  margin: { l: 55, r: 20, t: 20, b: 40 },
                   yaxis: {
                     showgrid: true,
                     gridcolor: "rgba(43, 49, 57, 0.5)",
                     zerolinecolor: "#2B3139",
+                    autorange: true,
                     ...tickOpts,
                   },
                   xaxis: {
@@ -1046,6 +1054,19 @@ export default function OperativaPage() {
                         100%
                       </td>
                     </tr>
+                    {pieAllocation.isLeveraged && (
+                      <tr className="border-t border-border">
+                        <td className="px-3 py-2 font-bold text-xs uppercase tracking-wider" style={{ color: "#FCD535" }}>
+                          Apalancamiento
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold" style={{ color: "#FCD535" }}>
+                          {fmtMoney(Math.round(pieAllocation.leverageAmount), sym)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-bold" style={{ color: "#FCD535" }}>
+                          {pieAllocation.leverageRatio.toFixed(1)}x
+                        </td>
+                      </tr>
+                    )}
                   </tfoot>
                 </table>
               </div>
