@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, useMemo, type FormEvent } from "react";
 import { useSession } from "@/hooks/useSession";
 import {
   openNewTrade,
@@ -11,10 +11,9 @@ import {
   updateStopLoss,
   deleteTrade,
 } from "@/lib/db/trades";
-import { curSym, fmtMoney2, getStrategyKeys } from "@/lib/calculations/helpers";
+import { curSym, fmtMoney, fmtMoney2, getStrategyKeys } from "@/lib/calculations/helpers";
 import type { Trade, OpenTradeWithMetrics } from "@/types/trade";
 import useSWR, { mutate } from "swr";
-import KpiCard from "@/components/ui/KpiCard";
 import PlotlyChart from "@/components/ui/PlotlyChart";
 
 function calculateMetrics(
@@ -87,7 +86,22 @@ export default function OperativaPage() {
 
   const initialBalance = (config.initial_balance as number) || 10000;
   const realizedPnl = closedTrades.reduce((s, t) => s + (t.pnl ?? 0), 0);
-  const accountBalance = initialBalance + realizedPnl;
+
+  // Fetch real account balance from performance API (same as Home)
+  const { data: perfData } = useSWR(
+    user ? `perf-balance-${user}-${initialBalance}` : null,
+    () =>
+      fetch(
+        `/api/performance?user=${user}&balance=${initialBalance}&benchmark=SPY&period=ALL`
+      ).then((r) => r.json())
+  );
+
+  const accountBalance = useMemo(() => {
+    if (perfData?.rows?.length > 0) {
+      return perfData.rows[perfData.rows.length - 1].total_value as number;
+    }
+    return initialBalance + realizedPnl;
+  }, [perfData, initialBalance, realizedPnl]);
 
   const tradesWithMetrics = calculateMetrics(openTrades, livePrices);
   const [pnlMode, setPnlMode] = useState<"$" | "%">("$");
@@ -352,6 +366,30 @@ export default function OperativaPage() {
   }
 
   const { data: chartData, layout: chartExtraLayout } = buildExposureChart();
+
+  // Portfolio allocation pie chart
+  const pieAllocation = useMemo(() => {
+    if (tradesWithMetrics.length === 0) return null;
+    const grouped: Record<string, number> = {};
+    for (const t of tradesWithMetrics) {
+      const val = t.entry_price * t.quantity;
+      grouped[t.symbol] = (grouped[t.symbol] || 0) + val;
+    }
+    const totalInvested = Object.values(grouped).reduce((s, v) => s + v, 0);
+    const liquidity = Math.max(0, accountBalance - totalInvested);
+    return {
+      labels: [...Object.keys(grouped), "Liquidez"],
+      values: [...Object.values(grouped), liquidity],
+      totalInvested,
+      liquidity,
+    };
+  }, [tradesWithMetrics, accountBalance]);
+
+  const PIE_COLORS = [
+    "#00B0BD", "#F6465D", "#FCD535", "#848E9C",
+    "#7B61FF", "#FF6B6B", "#4ECDC4", "#45B7D1",
+    "#96CEB4", "#DDA0DD",
+  ];
 
   const tickOpts = isPct
     ? { ticksuffix: "%", tickformat: ",.2f" }
@@ -775,23 +813,6 @@ export default function OperativaPage() {
           </div>
         </div>
 
-        {/* Exposure summary KPIs */}
-        {tradesWithMetrics.length > 0 && (
-          <div className="flex gap-3 overflow-x-auto pb-2">
-            <KpiCard
-              value={isPct ? fmtVal(totalPnlPctAcct, true, sym) : fmtMoney2(totalPnl, sym)}
-              label="PNL NO REALIZADO"
-              color={totalPnl >= 0 ? "#00B0BD" : "#F6465D"}
-            />
-            <KpiCard
-              value={isPct ? fmtVal(totalRiskPctAcct, true, sym) : fmtMoney2(totalRisk, sym)}
-              label="RIESGO ACTUAL"
-              color="#F6465D"
-            />
-            <KpiCard value={`${tradesWithMetrics.length}`} label="POSICIONES" />
-          </div>
-        )}
-
         {/* Exposure chart + Correlation matrix side by side */}
         {tradesWithMetrics.length > 0 && (
           <div className="flex flex-col xl:flex-row gap-4">
@@ -929,6 +950,106 @@ export default function OperativaPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Portfolio Allocation Pie Chart */}
+        {pieAllocation && (
+          <div className="flex flex-col xl:flex-row gap-4">
+            <div className="flex-1 min-w-0">
+              <PlotlyChart
+                data={[
+                  {
+                    type: "pie",
+                    labels: pieAllocation.labels,
+                    values: pieAllocation.values,
+                    hole: 0.55,
+                    marker: {
+                      colors: pieAllocation.labels.map((_, i) =>
+                        i === pieAllocation.labels.length - 1
+                          ? "rgba(132, 142, 156, 0.3)"
+                          : PIE_COLORS[i % PIE_COLORS.length]
+                      ),
+                      line: {
+                        color: "#181A20",
+                        width: 2,
+                      },
+                    },
+                    textinfo: "label+percent",
+                    textfont: { size: 11, color: "#EAECEF" },
+                    hovertemplate: `%{label}<br>${sym}%{value:,.0f}<br>%{percent}<extra></extra>`,
+                    sort: false,
+                  },
+                ]}
+                layout={{
+                  title: { text: "ASIGNACION DE CARTERA" },
+                  height: 300,
+                  margin: { t: 40, b: 20, l: 20, r: 20 },
+                  showlegend: false,
+                }}
+              />
+            </div>
+            <div className="xl:w-[280px] flex-shrink-0 space-y-2">
+              <h3 className="text-xs font-bold text-neutral tracking-wider">
+                DETALLE
+              </h3>
+              <div className="bg-card border border-border rounded-lg shadow-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-bg text-neutral uppercase text-[0.65rem] tracking-wider">
+                      <th className="px-3 py-2 text-left">Activo</th>
+                      <th className="px-3 py-2 text-right">Invertido</th>
+                      <th className="px-3 py-2 text-right">%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pieAllocation.labels.map((label, i) => {
+                      const value = pieAllocation.values[i];
+                      const total = pieAllocation.values.reduce((s, v) => s + v, 0);
+                      const pct = total > 0 ? (value / total) * 100 : 0;
+                      const isLiquidity = i === pieAllocation.labels.length - 1;
+                      return (
+                        <tr
+                          key={label}
+                          className={i % 2 === 1 ? "bg-row-odd" : ""}
+                        >
+                          <td className="px-3 py-1.5 font-semibold text-text-main flex items-center gap-2">
+                            <span
+                              className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+                              style={{
+                                backgroundColor: isLiquidity
+                                  ? "rgba(132, 142, 156, 0.3)"
+                                  : PIE_COLORS[i % PIE_COLORS.length],
+                              }}
+                            />
+                            {label}
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-text-main">
+                            {fmtMoney(Math.round(value), sym)}
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-neutral">
+                            {pct.toFixed(1)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t border-border">
+                      <td className="px-3 py-2 font-bold text-text-main text-xs uppercase tracking-wider">
+                        Balance
+                      </td>
+                      <td className="px-3 py-2 text-right font-bold text-accent">
+                        {fmtMoney(Math.round(accountBalance), sym)}
+                      </td>
+                      <td className="px-3 py-2 text-right text-neutral font-bold">
+                        100%
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </div>
