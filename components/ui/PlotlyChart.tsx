@@ -67,7 +67,7 @@ export default function PlotlyChart({
 
   return (
     <div
-      className={`rounded-lg overflow-hidden border border-border/50 shadow-lg ${className || ""}`}
+      className={`rounded-lg overflow-visible border border-border/50 shadow-lg ${className || ""}`}
     >
       <Plot
         data={data}
