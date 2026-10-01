@@ -853,8 +853,8 @@ export default function OperativaPage() {
                 data={chartData}
                 layout={{
                   ...chartExtraLayout,
-                  height: 280,
-                  margin: { l: 55, r: 20, t: 20, b: 40 },
+                  height: 320,
+                  margin: { l: 55, r: 20, t: 40, b: 55 },
                   yaxis: {
                     showgrid: true,
                     gridcolor: "rgba(43, 49, 57, 0.5)",
