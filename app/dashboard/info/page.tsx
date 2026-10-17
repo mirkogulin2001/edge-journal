@@ -196,6 +196,24 @@ const GLOSSARY = [
     ),
   },
   {
+    title: "Optimal f (Ralph Vince)",
+    body: (
+      <>
+        <p>
+          Version empirica de Kelly: en lugar de resumir el sistema en WinRate y
+          RatioPayout, usa la distribucion completa de multiplos R de tus trades
+          y busca la fraccion f que maximiza el crecimiento geometrico. Como el
+          optimal f suele implicar drawdowns muy profundos, se diluye por
+          biseccion hasta que el VaR 95% del max drawdown (Monte Carlo con
+          reposicion, horizonte = trades por sim) quede dentro del DD tolerado.
+        </p>
+        <p className="mt-2 font-mono text-xs text-accent">
+          f* = argmax promedio[ log(1 + f x R) ]
+        </p>
+      </>
+    ),
+  },
+  {
     title: "Maximo Drawdown",
     body: (
       <p>

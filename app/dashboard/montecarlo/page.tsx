@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useSession } from "@/hooks/useSession";
 import { getClosedTrades } from "@/lib/db/trades";
 import { fmtPct, curSym, fmtMoney2 } from "@/lib/calculations/helpers";
@@ -8,15 +8,32 @@ import type { Trade } from "@/types/trade";
 import useSWR from "swr";
 import KpiCard from "@/components/ui/KpiCard";
 import PlotlyChart from "@/components/ui/PlotlyChart";
+import { maxF, meanLogGrowth, optimalFWithDDLimit } from "@/lib/calculations/optimalF";
+
+type SizingModel = "KELLY" | "VINCE";
+
+interface GrowthMarker {
+  f: number;
+  g: number;
+  label: string;
+  main: boolean;
+}
 
 interface MCSetup {
+  model: SizingModel;
   p: number;
   q: number;
   B: number;
-  kellyFull: number;
+  fOptimal: number;
   fUsed: number;
-  kellyF: number[];
-  kellyG: number[];
+  kellyFraction: number;
+  ddTarget: number;
+  ddAtOptimal: number;
+  ddAtFinal: number;
+  diluted: boolean;
+  growthF: number[];
+  growthG: number[];
+  markers: GrowthMarker[];
   rrPop: number[];
 }
 
@@ -29,9 +46,33 @@ interface MCProgress {
   total: number;
 }
 
+function growthCurve(
+  limit: number,
+  g: (f: number) => number
+): { growthF: number[]; growthG: number[] } {
+  const growthF: number[] = [];
+  const growthG: number[] = [];
+  for (let i = 0; i <= 300; i++) {
+    const f = (i / 300) * limit;
+    const v = g(f);
+    if (v > 0) {
+      growthF.push(f);
+      growthG.push(v);
+    } else if (growthF.length > 0) {
+      growthF.push(f);
+      growthG.push(0);
+      break;
+    }
+  }
+  return { growthF, growthG };
+}
+
 function computeSetup(
   closed: Trade[],
-  kellyFraction: number
+  model: SizingModel,
+  kellyFraction: number,
+  ddTarget: number,
+  horizon: number
 ): MCSetup | null {
   if (closed.length === 0) return null;
 
@@ -61,34 +102,66 @@ function computeSetup(
       : 1;
   const B = avgLossR > 0 ? avgWinR / avgLossR : 0;
 
+  const rrPop = rrs.filter((r) => !isNaN(r));
+  if (rrPop.length === 0) return null;
+
+  const base = { model, p, q, B, kellyFraction, ddTarget, rrPop };
+
+  if (model === "VINCE") {
+    const res = optimalFWithDDLimit(rrPop, ddTarget, horizon);
+    const gVince = (f: number) => (Math.exp(meanLogGrowth(rrPop, f)) - 1) * 100;
+    const limit = Math.min(maxF(rrPop) * 0.999, Math.max(res.fOptimal * 2.5, 0.05));
+    const markers: GrowthMarker[] = [
+      { f: res.fOptimal, g: gVince(res.fOptimal), label: "Optimal f", main: true },
+    ];
+    if (res.diluted && res.fFinal > 0) {
+      markers.push({
+        f: res.fFinal,
+        g: gVince(res.fFinal),
+        label: `f diluido (DD≤${Math.round(ddTarget * 100)}%)`,
+        main: false,
+      });
+    }
+    return {
+      ...base,
+      fOptimal: res.fOptimal,
+      fUsed: res.fFinal,
+      ddAtOptimal: res.ddAtOptimal,
+      ddAtFinal: res.ddAtFinal,
+      diluted: res.diluted,
+      ...growthCurve(limit, gVince),
+      markers: markers.filter((m) => m.g > 0.01),
+    };
+  }
+
   let kellyFull = 0;
   if (B > 0) {
     kellyFull = Math.max(0, (p * (B + 1) - 1) / B);
   }
-  const fUsed = kellyFull * kellyFraction;
+  const gKelly = (f: number) =>
+    (Math.pow(1 + f * B, p) * Math.pow(1 - f, q) - 1) * 100;
+  const limit = Math.min(0.99, Math.max(0.4, kellyFull * 2.5));
+  const markers = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+    .map((m) => ({ m, f: kellyFull * m }))
+    .filter(({ f }) => f > 0 && f < 1)
+    .map(({ m, f }) => ({
+      f,
+      g: gKelly(f),
+      label: m === 1.0 ? "1.0x (Max)" : `${m}x`,
+      main: m === 1.0,
+    }))
+    .filter((mk) => mk.g > 0.01);
 
-  const limitSearch = Math.min(0.99, Math.max(0.4, kellyFull * 2.5));
-  const kellyF: number[] = [];
-  const kellyG: number[] = [];
-  for (let i = 0; i <= 300; i++) {
-    const f = (i / 300) * limitSearch;
-    const t1 = Math.pow(1 + f * B, p);
-    const t2 = Math.pow(1 - f, q);
-    const g = (t1 * t2 - 1) * 100;
-    if (g > 0) {
-      kellyF.push(f);
-      kellyG.push(g);
-    } else if (kellyF.length > 0) {
-      kellyF.push(f);
-      kellyG.push(0);
-      break;
-    }
-  }
-
-  const rrPop = rrs.filter((r) => !isNaN(r));
-  if (rrPop.length === 0) return null;
-
-  return { p, q, B, kellyFull, fUsed, kellyF, kellyG, rrPop };
+  return {
+    ...base,
+    fOptimal: kellyFull,
+    fUsed: kellyFull * kellyFraction,
+    ddAtOptimal: 0,
+    ddAtFinal: 0,
+    diluted: false,
+    ...growthCurve(limit, gKelly),
+    markers,
+  };
 }
 
 function runBatch(
@@ -213,7 +286,9 @@ export default function MonteCarloPage() {
   }, [perfData, closedTrades, initialBalance]);
 
   const [nSims, setNSims] = useState(500);
+  const [model, setModel] = useState<SizingModel>("KELLY");
   const [kellyFrac, setKellyFrac] = useState(0.5);
+  const [ddTargetPct, setDdTargetPct] = useState(35);
   const [tradesPerSim, setTradesPerSim] = useState(100);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<MCProgress | null>(null);
@@ -236,12 +311,25 @@ export default function MonteCarloPage() {
     return w;
   }, [closedTrades.length, tradesPerSim, nSims]);
 
-  const handleRun = useCallback(() => {
-    const setup = computeSetup(closedTrades, kellyFrac);
-    if (!setup) return;
-
+  function handleRun() {
     const id = ++runIdRef.current;
     setRunning(true);
+    // Defer so the button shows the running state before the (sync) optimal f search.
+    setTimeout(() => startRun(id), 10);
+  }
+
+  function startRun(id: number) {
+    const setup = computeSetup(
+      closedTrades,
+      model,
+      kellyFrac,
+      ddTargetPct / 100,
+      tradesPerSim
+    );
+    if (!setup || runIdRef.current !== id) {
+      setRunning(false);
+      return;
+    }
 
     const acc: MCProgress = {
       setup,
@@ -282,7 +370,7 @@ export default function MonteCarloPage() {
     }
 
     setTimeout(tick, 10);
-  }, [closedTrades, nSims, kellyFrac, tradesPerSim]);
+  }
 
   const stats = useMemo(
     () => (progress && progress.completed > 0 ? computeStats(progress) : null),
@@ -311,6 +399,34 @@ export default function MonteCarloPage() {
 
   return (
     <div className="space-y-6">
+      {/* Sizing model selector */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-neutral font-bold tracking-wider">
+          MODELO DE FRACCION OPTIMA
+        </span>
+        <div className="flex border border-border rounded overflow-hidden">
+          {(
+            [
+              { value: "KELLY", label: "F DE KELLY" },
+              { value: "VINCE", label: "OPTIMAL F (VINCE)" },
+            ] as const
+          ).map((m) => (
+            <button
+              key={m.value}
+              onClick={() => setModel(m.value)}
+              disabled={running}
+              className={`px-3 py-1.5 text-xs font-bold transition ${
+                model === m.value
+                  ? "bg-neutral/30 text-text-main"
+                  : "text-neutral hover:text-text-main"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Controls */}
       <div className="flex flex-wrap items-end gap-4">
         <div>
@@ -337,21 +453,44 @@ export default function MonteCarloPage() {
             disabled={running}
           />
         </div>
-        <div>
-          <label className="block text-xs text-neutral font-bold mb-1">
-            FRACCION KELLY
-          </label>
-          <input
-            type="number"
-            step="0.05"
-            min="0.05"
-            max="2"
-            value={kellyFrac}
-            onChange={(e) => setKellyFrac(Number(e.target.value))}
-            className={`w-28 ${INPUT}`}
-            disabled={running}
-          />
-        </div>
+        {model === "KELLY" ? (
+          <div>
+            <label className="block text-xs text-neutral font-bold mb-1">
+              FRACCION KELLY
+            </label>
+            <input
+              type="number"
+              step="0.05"
+              min="0.05"
+              max="2"
+              value={kellyFrac}
+              onChange={(e) => setKellyFrac(Number(e.target.value))}
+              className={`w-28 ${INPUT}`}
+              disabled={running}
+            />
+          </div>
+        ) : (
+          <div>
+            <label className="block text-xs text-neutral font-bold mb-1">
+              DD MAX TOLERADO (VaR 95%)
+            </label>
+            <div className="relative">
+              <input
+                type="number"
+                step="1"
+                min="1"
+                max="99"
+                value={ddTargetPct}
+                onChange={(e) => setDdTargetPct(Number(e.target.value))}
+                className={`w-28 pr-7 ${INPUT}`}
+                disabled={running}
+              />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-neutral">
+                %
+              </span>
+            </div>
+          </div>
+        )}
         <button
           onClick={handleRun}
           disabled={running || closedTrades.length === 0}
@@ -431,16 +570,43 @@ export default function MonteCarloPage() {
               label="RATIO R/B"
               color="#848E9C"
             />
-            <KpiCard
-              value={fmtPct(s.kellyFull * 100)}
-              label="KELLY OPTIMO"
-              color="#00B0BD"
-            />
-            <KpiCard
-              value={fmtPct(s.fUsed * 100)}
-              label={`RIESGO (x${kellyFrac})`}
-              color="#00B0BD"
-            />
+            {s.model === "KELLY" ? (
+              <>
+                <KpiCard
+                  value={fmtPct(s.fOptimal * 100)}
+                  label="KELLY OPTIMO"
+                  color="#00B0BD"
+                />
+                <KpiCard
+                  value={fmtPct(s.fUsed * 100)}
+                  label={`RIESGO (x${s.kellyFraction})`}
+                  color="#00B0BD"
+                />
+              </>
+            ) : (
+              <>
+                <KpiCard
+                  value={fmtPct(s.fOptimal * 100)}
+                  label="OPTIMAL F"
+                  color="#00B0BD"
+                />
+                <KpiCard
+                  value={fmtPct(s.ddAtOptimal * 100, 1)}
+                  label="VAR95 DD @ OPTIMAL F"
+                  color="#F6465D"
+                />
+                <KpiCard
+                  value={fmtPct(s.fUsed * 100)}
+                  label={s.diluted ? `F DILUIDO (DD≤${Math.round(s.ddTarget * 100)}%)` : "F FINAL (SIN DILUIR)"}
+                  color="#00B0BD"
+                />
+                <KpiCard
+                  value={fmtPct(s.ddAtFinal * 100, 1)}
+                  label="VAR95 DD @ F FINAL"
+                  color="#F6465D"
+                />
+              </>
+            )}
             <KpiCard
               value={fmtMoney2(Math.round(s.fUsed * accountBalance * 100) / 100, sym)}
               label={`RIESGO/TRADE (${sym})`}
@@ -689,48 +855,43 @@ export default function MonteCarloPage() {
               style={{ height: "380px" }}
             />
 
-            {/* Kelly curve */}
+            {/* Growth curve (Kelly or Optimal f) */}
             <PlotlyChart
               data={[
                 {
                   type: "scatter",
                   mode: "lines",
-                  x: s.kellyF,
-                  y: s.kellyG,
+                  x: s.growthF,
+                  y: s.growthG,
                   name: "G(f)",
                   line: { color: "rgba(144, 164, 174, 0.8)", width: 2.5, shape: "spline", smoothing: 1.0 },
                   fill: "tozeroy",
                   fillcolor: "rgba(144, 164, 174, 0.08)",
                 },
-                ...[0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
-                  .map((m) => {
-                    const fp = s.kellyFull * m;
-                    if (fp >= 1 || fp <= 0) return null;
-                    const t1 = Math.pow(1 + fp * s.B, s.p);
-                    const t2 = Math.pow(1 - fp, 1 - s.p);
-                    const gp = (t1 * t2 - 1) * 100;
-                    if (gp <= 0.01) return null;
-                    return {
-                      type: "scatter" as const,
-                      mode: "markers+text" as const,
-                      x: [fp],
-                      y: [gp],
-                      name: `${m}x Kelly`,
-                      marker: {
-                        color: m === 1.0 ? "#F6465D" : "rgba(252, 213, 53, 0.8)",
-                        size: m === 1.0 ? 12 : 8,
-                        symbol: m === 1.0 ? "diamond" : "circle",
-                        line: { color: m === 1.0 ? "#F6465D" : "#FCD535", width: 1.5 },
-                      },
-                      text: [m === 1.0 ? "1.0x (Max)" : `${m}x`],
-                      textposition: "top center" as const,
-                      textfont: { size: 10, color: "#EAECEF" },
-                    };
-                  })
-                  .filter((v): v is NonNullable<typeof v> => v != null),
+                ...s.markers.map((mk) => ({
+                  type: "scatter" as const,
+                  mode: "markers+text" as const,
+                  x: [mk.f],
+                  y: [mk.g],
+                  name: s.model === "KELLY" ? `${mk.label} Kelly` : mk.label,
+                  marker: {
+                    color: mk.main ? "#F6465D" : "rgba(252, 213, 53, 0.8)",
+                    size: mk.main ? 12 : 9,
+                    symbol: mk.main ? "diamond" : "circle",
+                    line: { color: mk.main ? "#F6465D" : "#FCD535", width: 1.5 },
+                  },
+                  text: [mk.label],
+                  textposition: "top center" as const,
+                  textfont: { size: 10, color: "#EAECEF" },
+                })),
               ]}
               layout={{
-                title: { text: "CURVA DE CRECIMIENTO VS RIESGO" },
+                title: {
+                  text:
+                    s.model === "KELLY"
+                      ? "CURVA DE CRECIMIENTO VS RIESGO (KELLY)"
+                      : "CURVA DE CRECIMIENTO VS RIESGO (OPTIMAL F)",
+                },
                 height: 380,
                 showlegend: true,
                 legend: { x: 1, xanchor: "right", y: 1, bgcolor: "rgba(24,26,32,0.6)", font: { size: 10, color: "#848E9C" }, bordercolor: "transparent" },
