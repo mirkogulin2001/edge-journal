@@ -13,6 +13,7 @@ import {
   updateTrade,
 } from "@/lib/db/trades";
 import { curSym, fmtMoney2, getStrategyKeys } from "@/lib/calculations/helpers";
+import { partialGroupKey } from "@/lib/calculations/mergePartials";
 import type { Trade, ClosedTradeWithPct } from "@/types/trade";
 import useSWR from "swr";
 
@@ -31,10 +32,6 @@ function addPnlPct(trades: Trade[]): ClosedTradeWithPct[] {
   });
 }
 
-function groupKey(t: Trade): string {
-  return `${t.symbol}|${t.entry_price}|${t.entry_date}`;
-}
-
 function hasExPostBe(t: Trade): boolean {
   return t.tags?._ex_post_be === "true";
 }
@@ -44,7 +41,7 @@ function mergeTrades(trades: ClosedTradeWithPct[]): MergedTrade[] {
   const order: string[] = [];
 
   for (const t of trades) {
-    const key = groupKey(t);
+    const key = partialGroupKey(t);
     if (!groups.has(key)) {
       groups.set(key, []);
       order.push(key);
@@ -331,7 +328,7 @@ export default function HistorialPage() {
   const pagedTrades = trades.slice(page * pageSize, (page + 1) * pageSize);
 
   function toggleExpand(t: MergedTrade) {
-    const key = groupKey(t);
+    const key = partialGroupKey(t);
     setExpandedKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -707,7 +704,7 @@ export default function HistorialPage() {
               ) : (
                 pagedTrades.flatMap((t, i) => {
                   const isExpanded =
-                    t.closes_count > 1 && expandedKeys.has(groupKey(t));
+                    t.closes_count > 1 && expandedKeys.has(partialGroupKey(t));
                   const pnl = t.pnl ?? 0;
                   const pnlPct = t.pnl_pct;
                   const isBe = t.result_type === "BE";
