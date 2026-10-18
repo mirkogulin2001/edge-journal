@@ -9,6 +9,7 @@ import useSWR from "swr";
 import KpiCard from "@/components/ui/KpiCard";
 import PlotlyChart from "@/components/ui/PlotlyChart";
 import { maxF, meanLogGrowth, optimalFWithDDLimit } from "@/lib/calculations/optimalF";
+import { mergePartialCloses } from "@/lib/calculations/mergePartials";
 
 type SizingModel = "KELLY" | "VINCE";
 
@@ -248,9 +249,13 @@ export default function MonteCarloPage() {
   const initialBalance = (config.initial_balance as number) || 10000;
   const sym = curSym(config);
 
-  const { data: closedTrades = [] } = useSWR(
+  const { data: rawClosedTrades } = useSWR(
     user ? `trades-closed-${user}` : null,
     () => getClosedTrades(user!)
+  );
+  const closedTrades = useMemo(
+    () => mergePartialCloses(rawClosedTrades ?? []),
+    [rawClosedTrades]
   );
 
   const tradingStats = useMemo(() => {
