@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { useSession } from "@/hooks/useSession";
 import { getClosedTrades, getOpenTrades } from "@/lib/db/trades";
 import { getCashMovements } from "@/lib/db/cashMovements";
+import { mergePartialCloses } from "@/lib/calculations/mergePartials";
 import {
   curSym,
   fmtMoney,
@@ -315,9 +316,13 @@ export default function AnalyticsPage() {
   const [filterStrategy, setFilterStrategy] = useState<Record<string, string>>({});
   const [filtersOpen, setFiltersOpen] = useState(false);
 
-  const { data: closedTrades = [] } = useSWR(
+  const { data: rawClosedTrades } = useSWR(
     user ? `trades-closed-${user}` : null,
     () => getClosedTrades(user!)
+  );
+  const closedTrades = useMemo(
+    () => mergePartialCloses(rawClosedTrades ?? []),
+    [rawClosedTrades]
   );
   const { data: openTrades = [] } = useSWR(
     user ? `trades-open-${user}` : null,
